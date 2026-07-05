@@ -1,0 +1,16 @@
+{
+  "interval_minutes": 15,
+  "speedtest": {
+    "binary_path": "speedtest",
+    "timeout_seconds": 60
+  },
+  "gcp": {
+    "service_account_key_path": "/etc/speedtest-logger/service-account.json",
+    "project_id": "YOUR_PROJECT_ID",
+    "collection": "speedtest_results"
+  },
+  "log": {
+    "path": "/var/log/speedtest-logger.log",
+    "level": "info"
+  }
+}
