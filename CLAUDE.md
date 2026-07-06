@@ -120,12 +120,15 @@ Routes are lazy-loaded:
 
 ## Internationalization (i18n)
 
-The UI must support two languages: **Portuguese (pt-BR)** and **English (en)**.
+The UI must support three languages: **Portuguese (pt-BR)**, **English (en)**, and **Spanish (es)**.
 
 - Library: **ngx-translate** (`@ngx-translate/core` + `@ngx-translate/http-loader`)
 - Translation files in `frontend/homepulse-web/src/assets/i18n/`:
   - `pt-BR.json` — default language
   - `en.json`
+  - `es.json`
+
+**Rule: any maintenance or new screen that touches user-facing strings must update all three translation files (pt-BR, en, es) in the same change.** A key added or changed in one file must be added or changed in the other two — never leave them out of sync.
 
 All user-facing strings must use the translate pipe or service. No hardcoded strings in templates or components.
 

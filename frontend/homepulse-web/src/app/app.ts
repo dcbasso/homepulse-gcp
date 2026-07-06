@@ -15,7 +15,7 @@ export class App implements OnInit {
   private themeService = inject(ThemeService);
 
   ngOnInit(): void {
-    this.translate.addLangs(['pt-BR', 'en']);
+    this.translate.addLangs(['pt-BR', 'en', 'es']);
     const stored = localStorage.getItem('lang') ?? 'pt-BR';
     this.translate.use(stored);
     this.themeService.initTheme();
