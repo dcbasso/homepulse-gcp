@@ -6,26 +6,43 @@ use std::path::Path;
 /// Root configuration loaded from `config.json`.
 ///
 /// Only the fields consumed by this binary are declared here; other fields
-/// present in the JSON file (e.g. `interval_minutes`, `log`) are ignored by serde.
+/// present in the JSON file (e.g. `log`) are ignored by serde.
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
+    pub heartbeat: HeartbeatConfig,
     pub speedtest: SpeedtestConfig,
     pub gcp: FirestoreConfig,
 }
 
-/// Settings for the speedtest CLI binary.
+/// Settings for the liveness heartbeat loop.
+///
+/// The heartbeat is a cheap, frequent write to Firestore that proves
+/// connectivity without running the expensive Ookla speedtest binary.
+#[derive(Debug, Deserialize, Clone)]
+pub struct HeartbeatConfig {
+    pub interval_minutes: u64,
+    pub collection: String,
+    pub whoami_url: String,
+}
+
+/// Settings for the speedtest CLI binary and its run cadence.
 #[derive(Debug, Deserialize, Clone)]
 pub struct SpeedtestConfig {
     pub binary_path: String,
     pub timeout_seconds: u64,
+    pub interval_minutes: u64,
+    pub collection: String,
 }
 
-/// Firestore connection settings (project ID and target collection).
+/// Firestore connection settings (project ID and Service Account key path).
+///
+/// Target collections are configured per-writer ([`HeartbeatConfig::collection`]
+/// and [`SpeedtestConfig::collection`]) since heartbeat and speedtest documents
+/// are stored in separate collections.
 #[derive(Debug, Deserialize, Clone)]
 pub struct FirestoreConfig {
     pub service_account_key_path: String,
     pub project_id: String,
-    pub collection: String,
 }
 
 /// Parsed representation of a Google Service Account JSON key file.
