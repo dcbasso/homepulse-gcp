@@ -34,7 +34,7 @@ const SUBJECT_PREFIX = '[homepulse] ';
 const DEFAULT_SUBJECT_DOWN_SUFFIX = 'Internet is down';
 const DEFAULT_SUBJECT_UP_SUFFIX   = 'Internet is back';
 const DEFAULT_BODY_DOWN =
-  'No speedtest record since ${DATETIME_DOWN}.\n\nHi ${NAME}, you will receive another email once the internet comes back.';
+  'No heartbeat received since ${DATETIME_DOWN}.\n\nHi ${NAME}, you will receive another email once the internet comes back.';
 const DEFAULT_BODY_UP =
   'Hi ${NAME}, the internet is back!\n\nDown at: ${DATETIME_DOWN}\nRecovered at: ${DATETIME_UP}\nTotal downtime: ${TOTAL_TIME} min';
 

@@ -74,6 +74,7 @@ resource "google_cloudfunctions2_function" "check_internet_status" {
       GCP_PROJECT_ID           = var.project_id
       ALERT_EMAIL              = var.alert_email
       MAX_MINUTES_WITHOUT_DATA = tostring(var.max_minutes_without_data)
+      FIRESTORE_DATABASE       = var.firestore_database
     }
 
     # Sensitive values injected from Secret Manager at startup.
@@ -147,8 +148,9 @@ resource "google_cloudfunctions2_function" "whoami" {
   }
 
   service_config {
-    # Minimal resources — a single stateless header read, no Firestore/Gmail calls.
-    available_memory   = "128M"
+    # 256M is the practical floor for Cloud Run's default fractional CPU —
+    # 128M (decimal) falls just under the 128Mi (binary) minimum it enforces.
+    available_memory   = "256M"
     timeout_seconds    = 10
     min_instance_count = 0
     max_instance_count = 1

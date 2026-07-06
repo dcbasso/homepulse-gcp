@@ -31,3 +31,9 @@ variable "max_minutes_without_data" {
   default     = 5
   description = "Minutes without a Firestore document before an alert is triggered"
 }
+
+variable "firestore_database" {
+  type        = string
+  default     = "speedtest-monitordb-one"
+  description = "Name of the Firestore database used by the client and this function (not the project's \"(default)\" database)"
+}
