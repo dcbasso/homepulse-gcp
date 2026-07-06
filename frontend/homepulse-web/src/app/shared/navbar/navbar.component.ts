@@ -41,6 +41,9 @@ const SUPPORTED_LANGS = ['pt-BR', 'en', 'es'] as const;
         <a mat-button routerLink="/settings" routerLinkActive="active-link">
           {{ 'NAV.SETTINGS' | translate }}
         </a>
+        <a mat-button routerLink="/about" routerLinkActive="active-link">
+          {{ 'NAV.ABOUT' | translate }}
+        </a>
       </nav>
       <span class="spacer"></span>
       <button mat-icon-button (click)="toggleLang()" [attr.aria-label]="currentLang()">

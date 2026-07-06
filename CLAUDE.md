@@ -144,7 +144,7 @@ Translation key structure:
 ```json
 {
   "COMMON": { "SAVE": "Save", "CANCEL": "Cancel", "LOADING": "Loading..." },
-  "LOGIN": { "TITLE": "Internet Monitor", "BUTTON": "Sign in with Google" },
+  "LOGIN": { "TITLE": "HomePulse", "BUTTON": "Sign in with Google" },
   "DASHBOARD": { "TITLE": "Dashboard", "NO_DATA": "No records found for this period" },
   "INCIDENTS": { "TITLE": "Incidents", "NO_INCIDENTS": "No incidents found — all good!" },
   "SETTINGS": { "TITLE": "Settings", "SAVE_SUCCESS": "Settings saved successfully" }

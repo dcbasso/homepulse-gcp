@@ -5,7 +5,7 @@
     "REMOVE": "Remover"
   },
   "LOGIN": {
-    "TITLE": "Monitor de Internet",
+    "TITLE": "HomePulse",
     "SUBTITLE": "Acompanhe a estabilidade da sua conexão",
     "BUTTON": "Entrar com Google"
   },
@@ -15,6 +15,7 @@
     "HISTORY": "Histórico",
     "IP_HISTORY": "Histórico de IP",
     "SETTINGS": "Configurações",
+    "ABOUT": "Sobre",
     "SIGN_OUT": "Sair"
   },
   "DASHBOARD": {
@@ -35,6 +36,9 @@
     "PING": "Ping",
     "JITTER": "Jitter",
     "PACKET_LOSS": "Perda de pacotes",
+    "CHART_DOWNLOAD_UPLOAD": "Download / Upload",
+    "CHART_PING_JITTER": "Ping / Jitter",
+    "CHART_PACKET_LOSS": "Perda de pacotes",
     "AVG": "Média",
     "MIN": "Mín",
     "MAX": "Máx",
@@ -113,5 +117,18 @@
     "SAVE": "Salvar",
     "SAVE_SUCCESS": "Configurações salvas com sucesso",
     "SAVE_ERROR": "Erro ao salvar as configurações"
+  },
+  "ABOUT": {
+    "TITLE": "Sobre",
+    "SECTION_APP": "Sobre o app",
+    "APP_NAME": "HomePulse",
+    "APP_DESCRIPTION": "Monitora sua conexão com a internet e avisa quando ela cair.",
+    "APP_VERSION": "Versão",
+    "APP_LICENSE": "Licença",
+    "SECTION_AUTHOR": "Desenvolvedor",
+    "AUTHOR_NAME": "Nome",
+    "AUTHOR_EMAIL": "E-mail",
+    "AUTHOR_GITHUB": "GitHub",
+    "AUTHOR_LINKEDIN": "LinkedIn"
   }
 }
