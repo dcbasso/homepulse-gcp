@@ -5,7 +5,7 @@
     "REMOVE": "Remove"
   },
   "LOGIN": {
-    "TITLE": "Internet Monitor",
+    "TITLE": "HomePulse",
     "SUBTITLE": "Track the stability of your connection",
     "BUTTON": "Sign in with Google"
   },
@@ -15,6 +15,7 @@
     "HISTORY": "History",
     "IP_HISTORY": "IP History",
     "SETTINGS": "Settings",
+    "ABOUT": "About",
     "SIGN_OUT": "Sign out"
   },
   "DASHBOARD": {
@@ -35,6 +36,9 @@
     "PING": "Ping",
     "JITTER": "Jitter",
     "PACKET_LOSS": "Packet loss",
+    "CHART_DOWNLOAD_UPLOAD": "Download / Upload",
+    "CHART_PING_JITTER": "Ping / Jitter",
+    "CHART_PACKET_LOSS": "Packet loss",
     "AVG": "Avg",
     "MIN": "Min",
     "MAX": "Max",
@@ -113,5 +117,18 @@
     "SAVE": "Save",
     "SAVE_SUCCESS": "Settings saved successfully",
     "SAVE_ERROR": "Failed to save settings"
+  },
+  "ABOUT": {
+    "TITLE": "About",
+    "SECTION_APP": "About the app",
+    "APP_NAME": "HomePulse",
+    "APP_DESCRIPTION": "Monitors your internet connection and alerts you when it goes down.",
+    "APP_VERSION": "Version",
+    "APP_LICENSE": "License",
+    "SECTION_AUTHOR": "Developer",
+    "AUTHOR_NAME": "Name",
+    "AUTHOR_EMAIL": "Email",
+    "AUTHOR_GITHUB": "GitHub",
+    "AUTHOR_LINKEDIN": "LinkedIn"
   }
 }
