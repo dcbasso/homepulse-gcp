@@ -28,6 +28,6 @@ variable "sa_email" {
 
 variable "max_minutes_without_data" {
   type        = number
-  default     = 45
+  default     = 5
   description = "Minutes without a Firestore document before an alert is triggered"
 }

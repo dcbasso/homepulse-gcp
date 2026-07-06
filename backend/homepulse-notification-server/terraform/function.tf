@@ -118,3 +118,57 @@ resource "google_cloud_run_service_iam_member" "function_invoker" {
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
+
+# ---------------------------------------------------------------------------
+# Cloud Function (Gen 2) — whoami
+#
+# Public HTTP endpoint that reports the caller's WAN IP address. Used by the
+# Rust client's heartbeat check. Reuses the same source archive as
+# check_internet_status (the whole function/ directory is already zipped),
+# only the entry point differs. No secrets required.
+# ---------------------------------------------------------------------------
+
+resource "google_cloudfunctions2_function" "whoami" {
+  name     = "whoami"
+  location = var.region
+
+  labels = local.common_labels
+
+  build_config {
+    runtime     = "python312"
+    entry_point = "whoami"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_source.name
+        object = google_storage_bucket_object.function_source.name
+      }
+    }
+  }
+
+  service_config {
+    # Minimal resources — a single stateless header read, no Firestore/Gmail calls.
+    available_memory   = "128M"
+    timeout_seconds    = 10
+    min_instance_count = 0
+    max_instance_count = 1
+
+    service_account_email = var.sa_email
+  }
+}
+
+# ---------------------------------------------------------------------------
+# IAM — allow unauthenticated HTTP invocations for whoami
+#
+# There is no Scheduler involved and no sensitive data is returned, so the
+# endpoint is public by design (unlike check_internet_status, which also
+# allows unauthenticated calls but relies on Scheduler's own OIDC audience).
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_run_service_iam_member" "whoami_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloudfunctions2_function.whoami.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}

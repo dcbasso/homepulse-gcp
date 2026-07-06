@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Cloud Scheduler job — triggers the Cloud Function every 15 minutes
+# Cloud Scheduler job — triggers the Cloud Function every 5 minutes
 #
 # Uses OIDC authentication so the function can verify the caller identity
 # without exposing the endpoint publicly beyond the IAM invoker binding.
@@ -11,8 +11,8 @@
 
 resource "google_cloud_scheduler_job" "check_internet_status" {
   name        = "check-internet-status"
-  description = "Triggers the Cloud Function to check for recent speedtest data"
-  schedule    = "*/15 * * * *"
+  description = "Triggers the Cloud Function to check for recent heartbeat data"
+  schedule    = "*/5 * * * *"
   time_zone   = "America/Sao_Paulo"
   region      = var.region
 

@@ -1,6 +1,6 @@
 """Cloud Function — Internet Monitor.
 
-Triggered by Cloud Scheduler every 5 minutes. Reads the latest speedtest
+Triggered by Cloud Scheduler every 5 minutes. Reads the latest heartbeat
 document from Firestore, compares its timestamp against a configurable
 threshold, and sends Gmail alerts on state transitions (up→down, down→up).
 Incident records are persisted in Firestore.
@@ -22,14 +22,14 @@ from googleapiclient.discovery import build
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-COLLECTION_SPEEDTEST = "speedtest_results"
+COLLECTION_HEARTBEAT = "heartbeats"
 COLLECTION_STATE = "monitor_state"
 COLLECTION_CONFIG = "monitor_config"
 COLLECTION_INCIDENTS = "incidents"
 STATE_DOC = "current"
 CONFIG_DOC = "current"
 
-DEFAULT_MAX_MINUTES = 10
+DEFAULT_MAX_MINUTES = 5
 DEFAULT_ALERT_EMAIL = os.environ.get("ALERT_EMAIL", "")
 DEFAULT_SUBJECT_DOWN = "[homepulse] Internet is down"
 DEFAULT_SUBJECT_UP = "[homepulse] Internet is back"
@@ -156,8 +156,8 @@ def _resolve_template(template: str, replacements: dict[str, str]) -> str:
     return result
 
 
-def _get_latest_speedtest_timestamp(db: firestore.Client) -> datetime | None:
-    """Queries the most recent speedtest result from Firestore.
+def _get_latest_heartbeat_timestamp(db: firestore.Client) -> datetime | None:
+    """Queries the most recent heartbeat document from Firestore.
 
     Args:
         db: Authenticated Firestore client.
@@ -166,7 +166,7 @@ def _get_latest_speedtest_timestamp(db: firestore.Client) -> datetime | None:
         The UTC timestamp of the latest document, or None if the collection is empty.
     """
     docs = (
-        db.collection(COLLECTION_SPEEDTEST)
+        db.collection(COLLECTION_HEARTBEAT)
         .order_by("timestamp", direction=firestore.Query.DESCENDING)
         .limit(1)
         .stream()
@@ -392,9 +392,9 @@ def check_internet_status(request) -> tuple[str, int]:
         db = _get_firestore_client()
         config = _load_monitor_config(db)
 
-        last_timestamp = _get_latest_speedtest_timestamp(db)
+        last_timestamp = _get_latest_heartbeat_timestamp(db)
         if last_timestamp is None:
-            logger.warning("No speedtest documents found in Firestore — skipping check")
+            logger.warning("No heartbeat documents found in Firestore — skipping check")
             return "No data available", 200
 
         now = datetime.now(timezone.utc)
@@ -448,3 +448,43 @@ def check_internet_status(request) -> tuple[str, int]:
     except Exception as exc:
         logger.exception("Unexpected error during internet status check: %s", exc)
         return f"Internal error: {exc}", 500
+
+
+def _resolve_caller_ip(request) -> str:
+    """Resolves the real caller IP address from an incoming HTTP request.
+
+    Cloud Functions Gen2 runs on Cloud Run behind the Google Front End, so
+    `request.remote_addr` reflects the GFE's internal address rather than the
+    original client. The actual caller IP is the first entry in the
+    comma-separated `X-Forwarded-For` header. Falls back to
+    `request.remote_addr` if the header is absent.
+
+    Args:
+        request: HTTP request object provided by Cloud Functions runtime.
+
+    Returns:
+        The resolved caller IP address, or an empty string if unavailable.
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.remote_addr or ""
+
+
+@functions_framework.http
+def whoami(request) -> tuple[dict, int]:
+    """Reports the caller's public IP address.
+
+    Public, unauthenticated endpoint intended for the Rust client's heartbeat
+    check — it lets the client discover the WAN IP it is currently reaching
+    GCP from. Returns no sensitive data.
+
+    Args:
+        request: HTTP request object provided by Cloud Functions runtime.
+
+    Returns:
+        A tuple of (response_body, http_status_code), where response_body is
+        a JSON-serializable dict of the form {"ip": "<caller's IP>"}.
+    """
+    ip = _resolve_caller_ip(request)
+    return {"ip": ip}, 200
