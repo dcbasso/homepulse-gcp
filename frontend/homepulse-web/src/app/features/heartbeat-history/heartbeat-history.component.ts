@@ -13,13 +13,13 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatCardModule } from '@angular/material/card';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { BehaviorSubject, catchError, of, switchMap, tap } from 'rxjs';
-import { SpeedtestResult } from '../../core/models/speedtest-result.model';
+import { Heartbeat } from '../../core/models/heartbeat.model';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 import { DateRange, DateRangeFilterComponent } from '../dashboard/components/date-range-filter/date-range-filter.component';
-import { IpTableComponent } from './components/ip-table/ip-table.component';
-import { IpHistoryDataService } from './ip-history-data.service';
+import { HeartbeatTableComponent } from './components/heartbeat-table/heartbeat-table.component';
+import { HeartbeatHistoryDataService } from './heartbeat-history-data.service';
 
-/** Default range for the IP history filter (last 24 hours). */
+/** Default range for the heartbeat history filter (last 24 hours). */
 function defaultRange(): DateRange {
   const end = new Date();
   const start = new Date();
@@ -28,19 +28,19 @@ function defaultRange(): DateRange {
 }
 
 /**
- * IP History screen.
+ * Heartbeat History screen.
  *
- * Displays a filterable, paginated table of speedtest results showing
- * the external IP, ISP and speedtest server for each measurement.
+ * Displays a filterable, paginated table of heartbeat documents showing
+ * the external IP captured at each liveness check.
  */
 @Component({
-  selector: 'app-ip-history',
+  selector: 'app-heartbeat-history',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     NavbarComponent,
     DateRangeFilterComponent,
-    IpTableComponent,
+    HeartbeatTableComponent,
     MatProgressSpinnerModule,
     MatCardModule,
     TranslatePipe,
@@ -48,8 +48,8 @@ function defaultRange(): DateRange {
   template: `
     <app-navbar />
 
-    <main class="ip-history-main">
-      <h2 class="page-title">{{ 'IP_HISTORY.TITLE' | translate }}</h2>
+    <main class="heartbeat-history-main">
+      <h2 class="page-title">{{ 'HEARTBEAT_HISTORY.TITLE' | translate }}</h2>
 
       <app-date-range-filter
         defaultPeriod="24h"
@@ -60,7 +60,7 @@ function defaultRange(): DateRange {
         <div class="summary-row">
           <mat-card appearance="outlined" class="summary-card">
             <mat-card-content>
-              <span class="summary-label">{{ 'IP_HISTORY.UNIQUE_IPS' | translate }}</span>
+              <span class="summary-label">{{ 'HEARTBEAT_HISTORY.UNIQUE_IPS' | translate }}</span>
               <span class="summary-value">{{ uniqueIpCount() }}</span>
             </mat-card-content>
           </mat-card>
@@ -72,12 +72,12 @@ function defaultRange(): DateRange {
           <mat-spinner diameter="40" />
         </div>
       } @else {
-        <app-ip-table [results]="results()" />
+        <app-heartbeat-table [results]="results()" />
       }
     </main>
   `,
   styles: [`
-    .ip-history-main {
+    .heartbeat-history-main {
       max-width: 1100px;
       margin: 0 auto;
       padding: 0 1.5rem 3rem;
@@ -128,8 +128,8 @@ function defaultRange(): DateRange {
     }
   `],
 })
-export class IpHistoryComponent implements OnInit {
-  private dataService = inject(IpHistoryDataService);
+export class HeartbeatHistoryComponent implements OnInit {
+  private dataService = inject(HeartbeatHistoryDataService);
   private snackBar    = inject(MatSnackBar);
   private translate   = inject(TranslateService);
   private destroyRef  = inject(DestroyRef);
@@ -138,7 +138,7 @@ export class IpHistoryComponent implements OnInit {
   readonly loading = signal(true);
 
   /** Current result list for the active date range. */
-  readonly results = signal<SpeedtestResult[]>([]);
+  readonly results = signal<Heartbeat[]>([]);
 
   /** Number of distinct external IPs in the current result set. */
   readonly uniqueIpCount = computed(() =>
@@ -159,7 +159,7 @@ export class IpHistoryComponent implements OnInit {
           catchError(() => {
             const msg = this.translate.instant('COMMON.ERROR');
             this.snackBar.open(msg, '', { duration: 4000 });
-            return of([] as SpeedtestResult[]);
+            return of([] as Heartbeat[]);
           }),
         ),
       ),

@@ -26,9 +26,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
-    path: 'ip-history',
+    path: 'heartbeat-history',
     loadComponent: () =>
-      import('./features/ip-history/ip-history.component').then((m) => m.IpHistoryComponent),
+      import('./features/heartbeat-history/heartbeat-history.component').then(
+        (m) => m.HeartbeatHistoryComponent,
+      ),
     canActivate: [authGuard],
   },
   {
