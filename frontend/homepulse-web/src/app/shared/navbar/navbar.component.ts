@@ -9,6 +9,9 @@ import { map } from 'rxjs';
 import { AuthService } from '../../core/auth.service';
 import { ThemeService } from '../../core/theme.service';
 
+/** Languages available in the UI, in the order the toggle cycles through them. */
+const SUPPORTED_LANGS = ['pt-BR', 'en', 'es'] as const;
+
 /**
  * Top navigation bar shown on all authenticated screens.
  *
@@ -87,10 +90,11 @@ export class NavbarComponent {
   );
 
   /**
-   * Toggles the UI language between pt-BR and English and persists the choice.
+   * Cycles the UI language through the supported locales and persists the choice.
    */
   toggleLang(): void {
-    const next = this.currentLang() === 'pt-BR' ? 'en' : 'pt-BR';
+    const currentIndex = SUPPORTED_LANGS.indexOf(this.currentLang() as (typeof SUPPORTED_LANGS)[number]);
+    const next = SUPPORTED_LANGS[(currentIndex + 1) % SUPPORTED_LANGS.length];
     this.translate.use(next);
     localStorage.setItem('lang', next);
   }
