@@ -74,6 +74,7 @@ resource "google_cloudfunctions2_function" "check_internet_status" {
       GCP_PROJECT_ID           = var.project_id
       ALERT_EMAIL              = var.alert_email
       MAX_MINUTES_WITHOUT_DATA = tostring(var.max_minutes_without_data)
+      FIRESTORE_DATABASE       = var.firestore_database
     }
 
     # Sensitive values injected from Secret Manager at startup.
@@ -115,6 +116,61 @@ resource "google_cloud_run_service_iam_member" "function_invoker" {
   project  = var.project_id
   location = var.region
   service  = google_cloudfunctions2_function.check_internet_status.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Function (Gen 2) — whoami
+#
+# Public HTTP endpoint that reports the caller's WAN IP address. Used by the
+# Rust client's heartbeat check. Reuses the same source archive as
+# check_internet_status (the whole function/ directory is already zipped),
+# only the entry point differs. No secrets required.
+# ---------------------------------------------------------------------------
+
+resource "google_cloudfunctions2_function" "whoami" {
+  name     = "whoami"
+  location = var.region
+
+  labels = local.common_labels
+
+  build_config {
+    runtime     = "python312"
+    entry_point = "whoami"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_source.name
+        object = google_storage_bucket_object.function_source.name
+      }
+    }
+  }
+
+  service_config {
+    # 256M is the practical floor for Cloud Run's default fractional CPU —
+    # 128M (decimal) falls just under the 128Mi (binary) minimum it enforces.
+    available_memory   = "256M"
+    timeout_seconds    = 10
+    min_instance_count = 0
+    max_instance_count = 1
+
+    service_account_email = var.sa_email
+  }
+}
+
+# ---------------------------------------------------------------------------
+# IAM — allow unauthenticated HTTP invocations for whoami
+#
+# There is no Scheduler involved and no sensitive data is returned, so the
+# endpoint is public by design (unlike check_internet_status, which also
+# allows unauthenticated calls but relies on Scheduler's own OIDC audience).
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_run_service_iam_member" "whoami_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloudfunctions2_function.whoami.name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

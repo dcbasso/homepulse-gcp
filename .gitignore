@@ -46,3 +46,10 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# Python bytecode cache
+**/__pycache__/
+*.pyc
+
+# Local deploy rules (contains real allowed-email substitution, never commit)
+.rules

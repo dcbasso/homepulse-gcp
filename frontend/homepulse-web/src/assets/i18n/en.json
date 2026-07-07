@@ -13,7 +13,7 @@
     "DASHBOARD": "Dashboard",
     "INCIDENTS": "Incidents",
     "HISTORY": "History",
-    "IP_HISTORY": "IP History",
+    "HEARTBEAT_HISTORY": "Heartbeat",
     "SETTINGS": "Settings",
     "ABOUT": "About",
     "SIGN_OUT": "Sign out"
@@ -79,12 +79,10 @@
     "TOTAL_RECORDS": "Total records",
     "NO_DATA": "No records found"
   },
-  "IP_HISTORY": {
-    "TITLE": "IP History",
+  "HEARTBEAT_HISTORY": {
+    "TITLE": "Heartbeat",
     "COL_TIME": "Date/time",
     "COL_IP": "IP address",
-    "COL_ISP": "ISP",
-    "COL_SERVER": "Server",
     "UNIQUE_IPS": "Unique IPs",
     "NO_DATA": "No records found"
   },

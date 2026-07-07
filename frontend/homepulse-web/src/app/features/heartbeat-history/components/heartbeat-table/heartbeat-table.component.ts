@@ -13,7 +13,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
 import { TranslatePipe } from '@ngx-translate/core';
 import { Timestamp } from '@angular/fire/firestore';
-import { SpeedtestResult } from '../../../../core/models/speedtest-result.model';
+import { Heartbeat } from '../../../../core/models/heartbeat.model';
 
 const PAGE_SIZE = 25;
 
@@ -29,11 +29,11 @@ function formatTimestamp(ts: Timestamp): string {
 }
 
 /**
- * Paginated table that displays the IP, ISP and server fields
- * from each speedtest result, with the measurement timestamp.
+ * Paginated table that displays the external IP field from each heartbeat
+ * document, alongside the heartbeat timestamp.
  */
 @Component({
-  selector: 'app-ip-table',
+  selector: 'app-heartbeat-table',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [MatTableModule, MatPaginatorModule, MatFormFieldModule, MatInputModule, MatIconModule, TranslatePipe],
@@ -50,23 +50,13 @@ function formatTimestamp(ts: Timestamp): string {
       <table mat-table [dataSource]="dataSource" class="ip-table">
 
         <ng-container matColumnDef="timestamp">
-          <th mat-header-cell *matHeaderCellDef>{{ 'IP_HISTORY.COL_TIME' | translate }}</th>
+          <th mat-header-cell *matHeaderCellDef>{{ 'HEARTBEAT_HISTORY.COL_TIME' | translate }}</th>
           <td mat-cell *matCellDef="let row">{{ formatTimestamp(row.timestamp) }}</td>
         </ng-container>
 
         <ng-container matColumnDef="external_ip">
-          <th mat-header-cell *matHeaderCellDef>{{ 'IP_HISTORY.COL_IP' | translate }}</th>
+          <th mat-header-cell *matHeaderCellDef>{{ 'HEARTBEAT_HISTORY.COL_IP' | translate }}</th>
           <td mat-cell *matCellDef="let row" class="ip-cell">{{ row.external_ip || '—' }}</td>
-        </ng-container>
-
-        <ng-container matColumnDef="isp">
-          <th mat-header-cell *matHeaderCellDef>{{ 'IP_HISTORY.COL_ISP' | translate }}</th>
-          <td mat-cell *matCellDef="let row">{{ row.isp || '—' }}</td>
-        </ng-container>
-
-        <ng-container matColumnDef="server">
-          <th mat-header-cell *matHeaderCellDef>{{ 'IP_HISTORY.COL_SERVER' | translate }}</th>
-          <td mat-cell *matCellDef="let row">{{ row.server || '—' }}</td>
         </ng-container>
 
         <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
@@ -74,7 +64,7 @@ function formatTimestamp(ts: Timestamp): string {
 
         <tr class="mat-row" *matNoDataRow>
           <td class="mat-cell empty-row" [attr.colspan]="displayedColumns.length">
-            {{ 'IP_HISTORY.NO_DATA' | translate }}
+            {{ 'HEARTBEAT_HISTORY.NO_DATA' | translate }}
           </td>
         </tr>
       </table>
@@ -104,23 +94,22 @@ function formatTimestamp(ts: Timestamp): string {
     }
   `],
 })
-export class IpTableComponent implements AfterViewInit {
-  /** Speedtest results to display. */
-  readonly results = input<SpeedtestResult[]>([]);
+export class HeartbeatTableComponent implements AfterViewInit {
+  /** Heartbeat documents to display. */
+  readonly results = input<Heartbeat[]>([]);
 
   @ViewChild(MatPaginator) paginator!: MatPaginator;
 
-  readonly dataSource = new MatTableDataSource<SpeedtestResult>([]);
-  readonly displayedColumns = ['timestamp', 'external_ip', 'isp', 'server'];
+  readonly dataSource = new MatTableDataSource<Heartbeat>([]);
+  readonly displayedColumns = ['timestamp', 'external_ip'];
   readonly PAGE_SIZE = PAGE_SIZE;
 
   protected readonly formatTimestamp = formatTimestamp;
 
   constructor() {
-    this.dataSource.filterPredicate = (row: SpeedtestResult, filter: string) => {
+    this.dataSource.filterPredicate = (row: Heartbeat, filter: string) => {
       const term = filter.trim().toLowerCase();
-      return [row.external_ip, row.isp, row.server]
-        .some(field => (field ?? '').toLowerCase().includes(term));
+      return (row.external_ip ?? '').toLowerCase().includes(term);
     };
 
     effect(() => {

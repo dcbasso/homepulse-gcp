@@ -1,6 +1,6 @@
 """Cloud Function — Internet Monitor.
 
-Triggered by Cloud Scheduler every 5 minutes. Reads the latest speedtest
+Triggered by Cloud Scheduler every 5 minutes. Reads the latest heartbeat
 document from Firestore, compares its timestamp against a configurable
 threshold, and sends Gmail alerts on state transitions (up→down, down→up).
 Incident records are persisted in Firestore.
@@ -10,6 +10,7 @@ import base64
 import email.mime.text
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -19,22 +20,36 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-logging.basicConfig(level=logging.INFO)
+# The Cloud Run Python runtime pre-configures the root logger with its own
+# handler, making `logging.basicConfig()` a no-op (it only takes effect when
+# the root logger has no handlers yet). Attaching an explicit handler here
+# guarantees INFO-level logs are emitted regardless of that pre-existing setup.
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setLevel(logging.INFO)
+logger.addHandler(_handler)
 
-COLLECTION_SPEEDTEST = "speedtest_results"
+COLLECTION_HEARTBEAT = "heartbeats"
 COLLECTION_STATE = "monitor_state"
 COLLECTION_CONFIG = "monitor_config"
 COLLECTION_INCIDENTS = "incidents"
+
+# Number of consecutive checks that must see a stale heartbeat before an
+# outage is confirmed and an alert is sent. Debounces single-sample false
+# positives (e.g. a transient Firestore read anomaly) without meaningfully
+# delaying detection of a real outage (adds at most one scheduler interval).
+DOWN_CONFIRMATION_CHECKS = 2
 STATE_DOC = "current"
 CONFIG_DOC = "current"
 
-DEFAULT_MAX_MINUTES = 10
+DEFAULT_MAX_MINUTES = 5
 DEFAULT_ALERT_EMAIL = os.environ.get("ALERT_EMAIL", "")
 DEFAULT_SUBJECT_DOWN = "[homepulse] Internet is down"
 DEFAULT_SUBJECT_UP = "[homepulse] Internet is back"
 DEFAULT_BODY_DOWN = (
-    "No speedtest record since ${DATETIME_DOWN}.\n\n"
+    "No heartbeat received since ${DATETIME_DOWN}.\n\n"
     "Hi ${NAME}, you will receive another email once the internet comes back."
 )
 DEFAULT_BODY_UP = (
@@ -50,7 +65,7 @@ class MonitorConfig:
     """Monitoring configuration loaded from Firestore.
 
     Attributes:
-        max_minutes: Minutes without speedtest data before an outage is declared.
+        max_minutes: Minutes without heartbeat data before an outage is declared.
         recipients: List of dicts with 'email' and 'name' keys for alert recipients.
         subject_down: Email subject used when the internet goes down.
         subject_up: Email subject used when the internet recovers.
@@ -156,8 +171,8 @@ def _resolve_template(template: str, replacements: dict[str, str]) -> str:
     return result
 
 
-def _get_latest_speedtest_timestamp(db: firestore.Client) -> datetime | None:
-    """Queries the most recent speedtest result from Firestore.
+def _get_latest_heartbeat_timestamp(db: firestore.Client) -> datetime | None:
+    """Queries the most recent heartbeat document from Firestore.
 
     Args:
         db: Authenticated Firestore client.
@@ -166,7 +181,7 @@ def _get_latest_speedtest_timestamp(db: firestore.Client) -> datetime | None:
         The UTC timestamp of the latest document, or None if the collection is empty.
     """
     docs = (
-        db.collection(COLLECTION_SPEEDTEST)
+        db.collection(COLLECTION_HEARTBEAT)
         .order_by("timestamp", direction=firestore.Query.DESCENDING)
         .limit(1)
         .stream()
@@ -181,32 +196,62 @@ def _get_latest_speedtest_timestamp(db: firestore.Client) -> datetime | None:
     return None
 
 
-def _read_monitor_state(db: firestore.Client) -> bool:
+def _read_monitor_state(db: firestore.Client) -> tuple[bool, int]:
     """Reads the current internet-down state from Firestore.
 
     Args:
         db: Authenticated Firestore client.
 
     Returns:
-        True if the internet was previously flagged as down, False otherwise.
+        A tuple of (internet_down, consecutive_down_checks). internet_down is
+        True if the internet was previously flagged as down (and an alert
+        already sent). consecutive_down_checks counts how many checks in a
+        row have seen a stale heartbeat without yet reaching
+        DOWN_CONFIRMATION_CHECKS (used to debounce single-sample anomalies).
     """
     doc = db.collection(COLLECTION_STATE).document(STATE_DOC).get()
     if doc.exists:
-        return bool(doc.to_dict().get("internet_down", False))
-    return False
+        data = doc.to_dict()
+        return (
+            bool(data.get("internet_down", False)),
+            int(data.get("consecutive_down_checks", 0)),
+        )
+    return False, 0
 
 
-def _write_monitor_state(db: firestore.Client, internet_down: bool) -> None:
-    """Persists the current internet-down state to Firestore.
+def _write_monitor_state(db: firestore.Client, internet_down: bool, consecutive_down_checks: int = 0) -> None:
+    """Persists a confirmed internet-down/up state transition to Firestore.
 
     Args:
         db: Authenticated Firestore client.
-        internet_down: True if the internet is currently considered down.
+        internet_down: True if the internet is now considered down.
+        consecutive_down_checks: Value to store for the running debounce counter
+            (0 on recovery, since the counter restarts from scratch afterwards).
     """
     now = datetime.now(timezone.utc)
     field_name = "last_down_alert_at" if internet_down else "last_recovery_alert_at"
     db.collection(COLLECTION_STATE).document(STATE_DOC).set(
-        {"internet_down": internet_down, field_name: now},
+        {
+            "internet_down": internet_down,
+            "consecutive_down_checks": consecutive_down_checks,
+            field_name: now,
+        },
+        merge=True,
+    )
+
+
+def _write_down_check_counter(db: firestore.Client, consecutive_down_checks: int) -> None:
+    """Persists the running count of consecutive stale-heartbeat checks.
+
+    Used while a potential outage has not yet been confirmed (has not reached
+    DOWN_CONFIRMATION_CHECKS), so no alert-related fields are touched.
+
+    Args:
+        db: Authenticated Firestore client.
+        consecutive_down_checks: The updated counter value.
+    """
+    db.collection(COLLECTION_STATE).document(STATE_DOC).set(
+        {"consecutive_down_checks": consecutive_down_checks},
         merge=True,
     )
 
@@ -327,7 +372,7 @@ def _send_down_alert(
 
     Args:
         recipient: Dict with 'email' and 'name' keys.
-        last_timestamp: UTC timestamp of the last received speedtest record.
+        last_timestamp: UTC timestamp of the last received heartbeat record.
         diff_minutes: Minutes elapsed since the last record.
         subject: Email subject line.
         body_template: Body template string with optional placeholders.
@@ -375,7 +420,7 @@ def _send_recovery_alert(
 
 @functions_framework.http
 def check_internet_status(request) -> tuple[str, int]:
-    """Check whether recent speedtest data exists and send alert emails if needed.
+    """Check whether recent heartbeat data exists and send alert emails if needed.
 
     Reads the latest document from Firestore, compares its timestamp against
     the configured threshold, and sends a Gmail alert on state transitions
@@ -392,9 +437,9 @@ def check_internet_status(request) -> tuple[str, int]:
         db = _get_firestore_client()
         config = _load_monitor_config(db)
 
-        last_timestamp = _get_latest_speedtest_timestamp(db)
+        last_timestamp = _get_latest_heartbeat_timestamp(db)
         if last_timestamp is None:
-            logger.warning("No speedtest documents found in Firestore — skipping check")
+            logger.warning("No heartbeat documents found in Firestore — skipping check")
             return "No data available", 200
 
         now = datetime.now(timezone.utc)
@@ -407,29 +452,38 @@ def check_internet_status(request) -> tuple[str, int]:
             config.max_minutes,
         )
 
-        internet_was_down = _read_monitor_state(db)
+        internet_was_down, consecutive_down_checks = _read_monitor_state(db)
 
         if diff_minutes > config.max_minutes:
-            if not internet_was_down:
-                logger.info("Internet appears DOWN — creating incident and sending alerts")
-                _create_incident(db)
-                _write_monitor_state(db, internet_down=True)
-                if config.notify_on_down:
-                    for recipient in config.recipients:
-                        _send_down_alert(
-                            recipient=recipient,
-                            last_timestamp=last_timestamp,
-                            diff_minutes=diff_minutes,
-                            subject=config.subject_down,
-                            body_template=config.body_down,
-                        )
-            else:
+            if internet_was_down:
                 logger.info("Internet still DOWN — no duplicate alert sent")
+            else:
+                consecutive_down_checks += 1
+                if consecutive_down_checks >= DOWN_CONFIRMATION_CHECKS:
+                    logger.info("Internet appears DOWN — creating incident and sending alerts")
+                    _create_incident(db)
+                    _write_monitor_state(db, internet_down=True, consecutive_down_checks=consecutive_down_checks)
+                    if config.notify_on_down:
+                        for recipient in config.recipients:
+                            _send_down_alert(
+                                recipient=recipient,
+                                last_timestamp=last_timestamp,
+                                diff_minutes=diff_minutes,
+                                subject=config.subject_down,
+                                body_template=config.body_down,
+                            )
+                else:
+                    logger.info(
+                        "Possible outage detected (%d/%d consecutive checks) — awaiting confirmation before alerting",
+                        consecutive_down_checks,
+                        DOWN_CONFIRMATION_CHECKS,
+                    )
+                    _write_down_check_counter(db, consecutive_down_checks)
         else:
             if internet_was_down:
                 logger.info("Internet is BACK — closing incident and sending recovery alerts")
                 started_at, duration_minutes = _close_latest_incident(db)
-                _write_monitor_state(db, internet_down=False)
+                _write_monitor_state(db, internet_down=False, consecutive_down_checks=0)
                 if config.notify_on_recovery:
                     for recipient in config.recipients:
                         _send_recovery_alert(
@@ -441,6 +495,8 @@ def check_internet_status(request) -> tuple[str, int]:
                             body_template=config.body_up,
                         )
             else:
+                if consecutive_down_checks:
+                    _write_down_check_counter(db, 0)
                 logger.info("Internet is UP — nothing to do")
 
         return "OK", 200
@@ -448,3 +504,43 @@ def check_internet_status(request) -> tuple[str, int]:
     except Exception as exc:
         logger.exception("Unexpected error during internet status check: %s", exc)
         return f"Internal error: {exc}", 500
+
+
+def _resolve_caller_ip(request) -> str:
+    """Resolves the real caller IP address from an incoming HTTP request.
+
+    Cloud Functions Gen2 runs on Cloud Run behind the Google Front End, so
+    `request.remote_addr` reflects the GFE's internal address rather than the
+    original client. The actual caller IP is the first entry in the
+    comma-separated `X-Forwarded-For` header. Falls back to
+    `request.remote_addr` if the header is absent.
+
+    Args:
+        request: HTTP request object provided by Cloud Functions runtime.
+
+    Returns:
+        The resolved caller IP address, or an empty string if unavailable.
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.remote_addr or ""
+
+
+@functions_framework.http
+def whoami(request) -> tuple[dict, int]:
+    """Reports the caller's public IP address.
+
+    Public, unauthenticated endpoint intended for the Rust client's heartbeat
+    check — it lets the client discover the WAN IP it is currently reaching
+    GCP from. Returns no sensitive data.
+
+    Args:
+        request: HTTP request object provided by Cloud Functions runtime.
+
+    Returns:
+        A tuple of (response_body, http_status_code), where response_body is
+        a JSON-serializable dict of the form {"ip": "<caller's IP>"}.
+    """
+    ip = _resolve_caller_ip(request)
+    return {"ip": ip}, 200

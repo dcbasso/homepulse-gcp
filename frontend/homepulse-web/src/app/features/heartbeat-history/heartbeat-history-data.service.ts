@@ -2,29 +2,29 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { Timestamp, orderBy, where } from '@angular/fire/firestore';
 import { FirestoreService } from '../../core/firestore.service';
-import { SpeedtestResult } from '../../core/models/speedtest-result.model';
+import { Heartbeat } from '../../core/models/heartbeat.model';
 
 /**
- * Provides Firestore queries for the IP history screen.
+ * Provides Firestore queries for the heartbeat history screen.
  *
- * Reads from `speedtest_results` — the same collection as the dashboard —
- * but only fetches the fields needed for the IP/ISP/server report.
+ * Reads from `heartbeats` — the lightweight liveness collection written by
+ * the client independently of the (heavier, less frequent) speedtest.
  */
 @Injectable({ providedIn: 'root' })
-export class IpHistoryDataService {
+export class HeartbeatHistoryDataService {
   private firestoreService = inject(FirestoreService);
 
   /**
-   * Returns a live observable of speedtest results within the given time range,
+   * Returns a live observable of heartbeat documents within the given time range,
    * ordered by timestamp descending (most recent first).
    *
    * @param start - Start of the query window (inclusive).
    * @param end   - End of the query window (inclusive).
-   * @returns Observable that emits the result array on every Firestore change.
+   * @returns Observable that emits the heartbeat array on every Firestore change.
    */
-  getResults(start: Date, end: Date): Observable<SpeedtestResult[]> {
-    return this.firestoreService.getCollection<SpeedtestResult>(
-      'speedtest_results',
+  getResults(start: Date, end: Date): Observable<Heartbeat[]> {
+    return this.firestoreService.getCollection<Heartbeat>(
+      'heartbeats',
       where('timestamp', '>=', Timestamp.fromDate(start)),
       where('timestamp', '<=', Timestamp.fromDate(end)),
       orderBy('timestamp', 'desc'),

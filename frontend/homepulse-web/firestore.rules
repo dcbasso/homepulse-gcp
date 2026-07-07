@@ -4,6 +4,9 @@ service cloud.firestore {
     match /speedtest_results/{doc} {
       allow read: if request.auth != null && request.auth.token.email == 'YOUR_ALLOWED_EMAIL';
     }
+    match /heartbeats/{doc} {
+      allow read: if request.auth != null && request.auth.token.email == 'YOUR_ALLOWED_EMAIL';
+    }
     match /incidents/{doc} {
       allow read: if request.auth != null && request.auth.token.email == 'YOUR_ALLOWED_EMAIL';
     }

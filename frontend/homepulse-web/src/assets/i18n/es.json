@@ -13,7 +13,7 @@
     "DASHBOARD": "Panel",
     "INCIDENTS": "Incidentes",
     "HISTORY": "Historial",
-    "IP_HISTORY": "Historial de IP",
+    "HEARTBEAT_HISTORY": "Heartbeat",
     "SETTINGS": "Configuración",
     "ABOUT": "Acerca de",
     "SIGN_OUT": "Cerrar sesión"
@@ -79,12 +79,10 @@
     "TOTAL_RECORDS": "Total de registros",
     "NO_DATA": "No se encontraron registros"
   },
-  "IP_HISTORY": {
-    "TITLE": "Historial de IP",
+  "HEARTBEAT_HISTORY": {
+    "TITLE": "Heartbeat",
     "COL_TIME": "Fecha/hora",
     "COL_IP": "Dirección IP",
-    "COL_ISP": "Proveedor",
-    "COL_SERVER": "Servidor",
     "UNIQUE_IPS": "IPs únicas",
     "NO_DATA": "No se encontraron registros"
   },

@@ -32,8 +32,8 @@ const SUPPORTED_LANGS = ['pt-BR', 'en', 'es'] as const;
         <a mat-button routerLink="/incidents" routerLinkActive="active-link">
           {{ 'NAV.INCIDENTS' | translate }}
         </a>
-        <a mat-button routerLink="/ip-history" routerLinkActive="active-link">
-          {{ 'NAV.IP_HISTORY' | translate }}
+        <a mat-button routerLink="/heartbeat-history" routerLinkActive="active-link">
+          {{ 'NAV.HEARTBEAT_HISTORY' | translate }}
         </a>
         <a mat-button routerLink="/history" routerLinkActive="active-link">
           {{ 'NAV.HISTORY' | translate }}
