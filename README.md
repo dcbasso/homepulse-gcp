@@ -4,6 +4,8 @@ Home internet connection monitor — GCP implementation.
 
 Runs a speedtest on a local machine on a schedule, stores results in Firestore, sends email alerts on outages, and exposes a web dashboard for historical analysis.
 
+Project page: https://www.dantebasso.com.br/opensource/homepulse-gcp
+
 ## Monorepo Structure
 
 | Path | Language | Description |

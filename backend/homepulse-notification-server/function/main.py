@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import functions_framework
+import requests
 from google.cloud import firestore
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -57,6 +58,8 @@ DEFAULT_BODY_UP = (
     "Down at: ${DATETIME_DOWN}\nRecovered at: ${DATETIME_UP}\nTotal downtime: ${TOTAL_TIME} min"
 )
 
+TELEGRAM_API_BASE = "https://api.telegram.org"
+
 _gmail_service = None
 
 
@@ -74,6 +77,10 @@ class MonitorConfig:
             ${DATETIME_UP}, and ${TOTAL_TIME}.
         notify_on_down: Whether to send email alerts when an outage is detected.
         notify_on_recovery: Whether to send email alerts when the internet recovers.
+        telegram_recipients: List of dicts with 'name', 'bot_token', and 'chat_id' keys
+            for Telegram alert recipients.
+        notify_telegram_on_down: Whether to send Telegram alerts when an outage is detected.
+        notify_telegram_on_recovery: Whether to send Telegram alerts when the internet recovers.
     """
 
     max_minutes: int
@@ -84,6 +91,9 @@ class MonitorConfig:
     body_up: str
     notify_on_down: bool
     notify_on_recovery: bool
+    telegram_recipients: list[dict]
+    notify_telegram_on_down: bool
+    notify_telegram_on_recovery: bool
 
 
 def _get_firestore_client() -> firestore.Client:
@@ -130,6 +140,15 @@ def _load_monitor_config(db: firestore.Client) -> MonitorConfig:
         if not recipients:
             recipients = [{"email": DEFAULT_ALERT_EMAIL, "name": ""}]
 
+        telegram_recipients = [
+            {
+                "name": r.get("name", ""),
+                "bot_token": r.get("bot_token", ""),
+                "chat_id": r.get("chat_id", ""),
+            }
+            for r in (data.get("telegram_recipients") or [])
+        ]
+
         return MonitorConfig(
             max_minutes=max_minutes,
             recipients=recipients,
@@ -139,6 +158,9 @@ def _load_monitor_config(db: firestore.Client) -> MonitorConfig:
             body_up=data.get("email_body_up") or DEFAULT_BODY_UP,
             notify_on_down=bool(data.get("notify_on_down", True)),
             notify_on_recovery=bool(data.get("notify_on_recovery", True)),
+            telegram_recipients=telegram_recipients,
+            notify_telegram_on_down=bool(data.get("notify_telegram_on_down", True)),
+            notify_telegram_on_recovery=bool(data.get("notify_telegram_on_recovery", True)),
         )
 
     logger.warning("monitor_config/current not found — using env var defaults")
@@ -152,6 +174,9 @@ def _load_monitor_config(db: firestore.Client) -> MonitorConfig:
         body_up=DEFAULT_BODY_UP,
         notify_on_down=True,
         notify_on_recovery=True,
+        telegram_recipients=[],
+        notify_telegram_on_down=True,
+        notify_telegram_on_recovery=True,
     )
 
 
@@ -418,14 +443,88 @@ def _send_recovery_alert(
     _send_email(to=recipient["email"], subject=subject, body=body)
 
 
+def _send_telegram_message(bot_token: str, chat_id: str, text: str) -> None:
+    """Sends a text message via the Telegram Bot API.
+
+    Args:
+        bot_token: Telegram bot token obtained from @BotFather.
+        chat_id: Telegram chat ID (or @channelusername) to send the message to.
+        text: Plain-text message body (Telegram's sendMessage has no subject field).
+    """
+    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendMessage"
+    response = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
+    response.raise_for_status()
+    logger.info("Telegram message sent to chat_id %s", chat_id)
+
+
+def _send_telegram_down_alert(
+    recipient: dict,
+    last_timestamp: datetime,
+    subject: str,
+    body_template: str,
+) -> None:
+    """Sends an internet-down alert via Telegram to a single recipient.
+
+    Resolves ${NAME} and ${DATETIME_DOWN} placeholders in the body template, then
+    combines subject and body into a single message since Telegram has no subject field.
+
+    Args:
+        recipient: Dict with 'name', 'bot_token', and 'chat_id' keys.
+        last_timestamp: UTC timestamp of the last received heartbeat record.
+        subject: Subject line (same value used for the email subject).
+        body_template: Body template string with optional placeholders.
+    """
+    body = _resolve_template(body_template, {
+        "NAME": recipient["name"],
+        "DATETIME_DOWN": last_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+    })
+    _send_telegram_message(recipient["bot_token"], recipient["chat_id"], f"{subject}\n\n{body}")
+
+
+def _send_telegram_recovery_alert(
+    recipient: dict,
+    recovery_timestamp: datetime,
+    started_at: datetime | None,
+    duration_minutes: int | None,
+    subject: str,
+    body_template: str,
+) -> None:
+    """Sends an internet-recovery alert via Telegram to a single recipient.
+
+    Resolves ${NAME}, ${DATETIME_DOWN}, ${DATETIME_UP}, and ${TOTAL_TIME} placeholders
+    in the body template, then combines subject and body into a single message since
+    Telegram has no subject field.
+
+    Args:
+        recipient: Dict with 'name', 'bot_token', and 'chat_id' keys.
+        recovery_timestamp: UTC timestamp when the internet was detected as recovered.
+        started_at: UTC timestamp when the outage started, or None if unavailable.
+        duration_minutes: Total outage duration in minutes, or None if unavailable.
+        subject: Subject line (same value used for the email subject).
+        body_template: Body template string with optional placeholders.
+    """
+    datetime_down = (
+        started_at.strftime("%Y-%m-%d %H:%M:%S UTC") if started_at else "unknown"
+    )
+    total_time = str(duration_minutes) if duration_minutes is not None else "unknown"
+    body = _resolve_template(body_template, {
+        "NAME": recipient["name"],
+        "DATETIME_DOWN": datetime_down,
+        "DATETIME_UP": recovery_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "TOTAL_TIME": total_time,
+    })
+    _send_telegram_message(recipient["bot_token"], recipient["chat_id"], f"{subject}\n\n{body}")
+
+
 @functions_framework.http
 def check_internet_status(request) -> tuple[str, int]:
-    """Check whether recent heartbeat data exists and send alert emails if needed.
+    """Check whether recent heartbeat data exists and send alerts if needed.
 
     Reads the latest document from Firestore, compares its timestamp against
-    the configured threshold, and sends a Gmail alert on state transitions
-    (down→up or up→down). Incident documents are created and closed accordingly.
-    Emails are sent to all configured recipients with per-recipient name substitution.
+    the configured threshold, and sends Gmail and/or Telegram alerts on state
+    transitions (down→up or up→down). Incident documents are created and closed
+    accordingly. Alerts are sent to all configured recipients on each enabled
+    channel, with per-recipient name substitution.
 
     Args:
         request: HTTP request object provided by Cloud Functions runtime.
@@ -472,6 +571,14 @@ def check_internet_status(request) -> tuple[str, int]:
                                 subject=config.subject_down,
                                 body_template=config.body_down,
                             )
+                    if config.notify_telegram_on_down:
+                        for recipient in config.telegram_recipients:
+                            _send_telegram_down_alert(
+                                recipient=recipient,
+                                last_timestamp=last_timestamp,
+                                subject=config.subject_down,
+                                body_template=config.body_down,
+                            )
                 else:
                     logger.info(
                         "Possible outage detected (%d/%d consecutive checks) — awaiting confirmation before alerting",
@@ -487,6 +594,16 @@ def check_internet_status(request) -> tuple[str, int]:
                 if config.notify_on_recovery:
                     for recipient in config.recipients:
                         _send_recovery_alert(
+                            recipient=recipient,
+                            recovery_timestamp=last_timestamp,
+                            started_at=started_at,
+                            duration_minutes=duration_minutes,
+                            subject=config.subject_up,
+                            body_template=config.body_up,
+                        )
+                if config.notify_telegram_on_recovery:
+                    for recipient in config.telegram_recipients:
+                        _send_telegram_recovery_alert(
                             recipient=recipient,
                             recovery_timestamp=last_timestamp,
                             started_at=started_at,

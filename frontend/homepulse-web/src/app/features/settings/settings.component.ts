@@ -1,8 +1,6 @@
 import {
-  AbstractControl,
   FormBuilder,
   ReactiveFormsModule,
-  ValidationErrors,
   Validators,
 } from '@angular/forms';
 import {
@@ -19,18 +17,22 @@ import { take } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatDialog } from '@angular/material/dialog';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { Timestamp } from '@angular/fire/firestore';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 import { SettingsDataService } from './settings-data.service';
-import { MonitorConfig, Recipient } from '../../core/models/monitor-config.model';
+import { MonitorConfig, Recipient, TelegramRecipient } from '../../core/models/monitor-config.model';
 import { environment } from '../../../environments/environment';
+import { TelegramHelpDialogComponent } from './components/telegram-help-dialog/telegram-help-dialog.component';
 
-const SUBJECT_PREFIX = '[homepulse] ';
+const DEFAULT_SUBJECT_PREFIX = 'HomePulse';
 const DEFAULT_SUBJECT_DOWN_SUFFIX = 'Internet is down';
 const DEFAULT_SUBJECT_UP_SUFFIX   = 'Internet is back';
 const DEFAULT_BODY_DOWN =
@@ -39,39 +41,45 @@ const DEFAULT_BODY_UP =
   'Hi ${NAME}, the internet is back!\n\nDown at: ${DATETIME_DOWN}\nRecovered at: ${DATETIME_UP}\nTotal downtime: ${TOTAL_TIME} min';
 
 const FORM_DEFAULTS = {
-  check_interval_minutes:   15,
   max_minutes_without_data: 45,
+  email_subject_prefix:     DEFAULT_SUBJECT_PREFIX,
   email_subject_down:       DEFAULT_SUBJECT_DOWN_SUFFIX,
   email_subject_up:         DEFAULT_SUBJECT_UP_SUFFIX,
   email_body_down:          DEFAULT_BODY_DOWN,
   email_body_up:            DEFAULT_BODY_UP,
   notify_on_down:           true,
   notify_on_recovery:       true,
+  notify_telegram_on_down:     true,
+  notify_telegram_on_recovery: true,
 };
 
+/** Bot token pattern: "<numeric bot id>:<secret>" as issued by @BotFather. */
+const TELEGRAM_BOT_TOKEN_PATTERN = /^\d+:[A-Za-z0-9_-]+$/;
+
+/** Chat ID pattern: a signed integer (private/group chats) or an @username (channels). */
+const TELEGRAM_CHAT_ID_PATTERN = /^-?\d+$|^@[A-Za-z0-9_]{5,32}$/;
+
+const TELEGRAM_API_BASE = 'https://api.telegram.org';
+
 /**
- * Strips the mandatory "[homepulse] " prefix from a stored subject string.
- * Returns only the editable suffix so it can be bound to the form field.
+ * Formats the bracketed marker prepended to every email subject, e.g. "[ HomePulse ] ".
  *
- * @param subject - Full subject string as stored in Firestore.
+ * @param prefix - User-configured prefix value (falls back to the default when empty).
  */
-function stripSubjectPrefix(subject: string): string {
-  return subject.startsWith(SUBJECT_PREFIX) ? subject.slice(SUBJECT_PREFIX.length) : subject;
+function buildSubjectPrefixMarker(prefix: string): string {
+  return `[ ${prefix || DEFAULT_SUBJECT_PREFIX} ] `;
 }
 
 /**
- * Cross-field validator: max_minutes_without_data must be greater than check_interval_minutes.
+ * Strips the bracketed prefix marker from a stored subject string.
+ * Returns only the editable suffix so it can be bound to the form field.
  *
- * @param control - The form group to validate.
- * @returns Validation errors or null if valid.
+ * @param subject - Full subject string as stored in Firestore.
+ * @param prefix - The prefix value the marker was built with.
  */
-function thresholdValidator(control: AbstractControl): ValidationErrors | null {
-  const interval  = control.get('check_interval_minutes')?.value as number | null;
-  const threshold = control.get('max_minutes_without_data')?.value as number | null;
-  if (interval !== null && threshold !== null && threshold <= interval) {
-    return { thresholdTooLow: true };
-  }
-  return null;
+function stripSubjectPrefix(subject: string, prefix: string): string {
+  const marker = buildSubjectPrefixMarker(prefix);
+  return subject.startsWith(marker) ? subject.slice(marker.length) : subject;
 }
 
 /**
@@ -100,6 +108,17 @@ function buildRecipients(config: MonitorConfig): Recipient[] {
 }
 
 /**
+ * Masks a Telegram bot token for chip display, revealing only the last 4 characters.
+ * Display-only — the add/edit form always shows the full token.
+ *
+ * @param token - Full bot token as stored in Firestore.
+ */
+function maskBotToken(token: string): string {
+  if (token.length <= 4) return '••••';
+  return `••••${token.slice(-4)}`;
+}
+
+/**
  * Settings screen.
  *
  * Manages monitoring intervals, alert thresholds, email recipients (with display names),
@@ -119,6 +138,8 @@ function buildRecipients(config: MonitorConfig): Recipient[] {
     MatCheckboxModule,
     MatButtonModule,
     MatProgressSpinnerModule,
+    MatIconModule,
+    MatTooltipModule,
     TranslatePipe,
   ],
   template: `
@@ -136,21 +157,12 @@ function buildRecipients(config: MonitorConfig): Recipient[] {
           </mat-card-header>
           <mat-card-content>
 
-            <mat-form-field appearance="outline" class="full-width">
-              <mat-label>{{ 'SETTINGS.FIELD_INTERVAL' | translate }}</mat-label>
-              <input matInput type="number" formControlName="check_interval_minutes" />
-              <mat-hint>{{ 'SETTINGS.FIELD_INTERVAL_HINT' | translate }}</mat-hint>
-              @if (form.get('check_interval_minutes')?.invalid && form.get('check_interval_minutes')?.touched) {
-                <mat-error>5 – 60</mat-error>
-              }
-            </mat-form-field>
+            <p class="section-label">{{ 'SETTINGS.FIXED_INTERVAL_INFO' | translate }}</p>
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>{{ 'SETTINGS.FIELD_THRESHOLD' | translate }}</mat-label>
               <input matInput type="number" formControlName="max_minutes_without_data" />
-              @if (form.hasError('thresholdTooLow') && form.get('max_minutes_without_data')?.dirty) {
-                <mat-error>{{ 'SETTINGS.THRESHOLD_ERROR' | translate }}</mat-error>
-              }
+              <mat-hint>{{ 'SETTINGS.FIELD_THRESHOLD_HINT' | translate }}</mat-hint>
             </mat-form-field>
 
           </mat-card-content>
@@ -229,16 +241,127 @@ function buildRecipients(config: MonitorConfig): Recipient[] {
             </div>
 
             <mat-form-field appearance="outline" class="full-width">
+              <mat-label>{{ 'SETTINGS.FIELD_SUBJECT_PREFIX' | translate }}</mat-label>
+              <input matInput type="text" formControlName="email_subject_prefix" />
+              <mat-hint>{{ 'SETTINGS.FIELD_SUBJECT_PREFIX_HINT' | translate }}</mat-hint>
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="full-width">
               <mat-label>{{ 'SETTINGS.FIELD_SUBJECT_DOWN' | translate }}</mat-label>
-              <span matTextPrefix class="subject-prefix">[homepulse]&nbsp;</span>
+              <span matTextPrefix class="subject-prefix">[&nbsp;{{ form.get('email_subject_prefix')?.value || defaultSubjectPrefix }}&nbsp;]&nbsp;</span>
               <input matInput type="text" formControlName="email_subject_down" />
             </mat-form-field>
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>{{ 'SETTINGS.FIELD_SUBJECT_UP' | translate }}</mat-label>
-              <span matTextPrefix class="subject-prefix">[homepulse]&nbsp;</span>
+              <span matTextPrefix class="subject-prefix">[&nbsp;{{ form.get('email_subject_prefix')?.value || defaultSubjectPrefix }}&nbsp;]&nbsp;</span>
               <input matInput type="text" formControlName="email_subject_up" />
             </mat-form-field>
+
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Telegram Notifications section -->
+        <mat-card class="settings-card">
+          <mat-card-header>
+            <mat-card-title class="card-title-with-help">
+              {{ 'SETTINGS.SECTION_TELEGRAM' | translate }}
+              <button
+                type="button"
+                mat-icon-button
+                class="help-icon-button"
+                (click)="openTelegramHelp()"
+                [matTooltip]="'SETTINGS.TELEGRAM_HELP_TOOLTIP' | translate"
+                [attr.aria-label]="'SETTINGS.TELEGRAM_HELP_TOOLTIP' | translate"
+              >
+                <mat-icon>info_outline</mat-icon>
+              </button>
+            </mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+
+            <p class="section-label">{{ 'SETTINGS.SECTION_RECIPIENTS' | translate }}</p>
+
+            <div class="chip-list">
+              @for (r of telegramRecipients(); track r.chat_id + r.bot_token; let i = $index) {
+                <div class="recipient-chip">
+                  <span class="chip-body" (click)="openEditTelegramRecipient(i)">
+                    <span class="chip-name">{{ r.name }}</span>
+                    <span class="chip-sep">|</span>
+                    <span class="chip-email">{{ maskBotToken(r.bot_token) }}</span>
+                  </span>
+                  <button
+                    type="button"
+                    class="chip-remove"
+                    (click)="removeTelegramRecipient(i)"
+                    [attr.aria-label]="'COMMON.REMOVE' | translate"
+                  >×</button>
+                </div>
+              }
+            </div>
+
+            @if (showTelegramRecipientForm()) {
+              <div class="recipient-form" [formGroup]="addTelegramForm">
+                <div class="recipient-form-fields">
+                  <mat-form-field appearance="outline" class="recipient-field">
+                    <mat-label>{{ 'SETTINGS.FIELD_TELEGRAM_NAME' | translate }}</mat-label>
+                    <input matInput type="text" formControlName="name" />
+                  </mat-form-field>
+                  <mat-form-field appearance="outline" class="recipient-field">
+                    <mat-label>{{ 'SETTINGS.FIELD_TELEGRAM_BOT_TOKEN' | translate }}</mat-label>
+                    <input matInput type="text" formControlName="bot_token" />
+                    @if (addTelegramForm.get('bot_token')?.invalid && addTelegramForm.get('bot_token')?.touched) {
+                      <mat-error>{{ 'SETTINGS.FIELD_TELEGRAM_BOT_TOKEN_INVALID' | translate }}</mat-error>
+                    }
+                  </mat-form-field>
+                  <mat-form-field appearance="outline" class="recipient-field">
+                    <mat-label>{{ 'SETTINGS.FIELD_TELEGRAM_CHAT_ID' | translate }}</mat-label>
+                    <input matInput type="text" formControlName="chat_id" />
+                    <button
+                      type="button"
+                      mat-icon-button
+                      matSuffix
+                      [disabled]="addTelegramForm.get('bot_token')?.invalid"
+                      (click)="openTelegramGetUpdates()"
+                      [matTooltip]="'SETTINGS.TELEGRAM_GET_UPDATES_TOOLTIP' | translate"
+                      [attr.aria-label]="'SETTINGS.TELEGRAM_GET_UPDATES_TOOLTIP' | translate"
+                    >
+                      <mat-icon>open_in_new</mat-icon>
+                    </button>
+                    @if (addTelegramForm.get('chat_id')?.invalid && addTelegramForm.get('chat_id')?.touched) {
+                      <mat-error>{{ 'SETTINGS.FIELD_TELEGRAM_CHAT_ID_INVALID' | translate }}</mat-error>
+                    }
+                  </mat-form-field>
+                </div>
+                <div class="recipient-form-actions">
+                  <button type="button" mat-button (click)="cancelTelegramRecipientForm()">
+                    {{ 'SETTINGS.CANCEL' | translate }}
+                  </button>
+                  <button
+                    type="button"
+                    mat-raised-button
+                    color="primary"
+                    (click)="confirmTelegramRecipient()"
+                    [disabled]="addTelegramForm.invalid"
+                  >
+                    {{ 'SETTINGS.CONFIRM' | translate }}
+                  </button>
+                </div>
+              </div>
+            } @else {
+              <button type="button" mat-stroked-button (click)="openAddTelegramRecipient()">
+                + {{ 'SETTINGS.ADD_TELEGRAM_RECIPIENT' | translate }}
+              </button>
+            }
+
+            <div class="checkbox-group">
+              <mat-checkbox formControlName="notify_telegram_on_down">
+                {{ 'SETTINGS.FIELD_NOTIFY_DOWN_TELEGRAM' | translate }}
+              </mat-checkbox>
+              <mat-checkbox formControlName="notify_telegram_on_recovery">
+                {{ 'SETTINGS.FIELD_NOTIFY_RECOVERY_TELEGRAM' | translate }}
+              </mat-checkbox>
+            </div>
 
           </mat-card-content>
         </mat-card>
@@ -277,7 +400,7 @@ function buildRecipients(config: MonitorConfig): Recipient[] {
               mat-button
               type="button"
               (click)="cancel()"
-              [disabled]="(form.pristine && !recipientsDirty()) || saving()"
+              [disabled]="(form.pristine && !recipientsDirty() && !telegramRecipientsDirty()) || saving()"
             >
               {{ 'SETTINGS.CANCEL' | translate }}
             </button>
@@ -285,7 +408,7 @@ function buildRecipients(config: MonitorConfig): Recipient[] {
               mat-raised-button
               color="primary"
               type="submit"
-              [disabled]="form.invalid || (form.pristine && !recipientsDirty()) || saving() || recipients().length === 0"
+              [disabled]="form.invalid || (form.pristine && !recipientsDirty() && !telegramRecipientsDirty()) || saving() || (recipients().length === 0 && telegramRecipients().length === 0)"
             >
               @if (saving()) {
                 <mat-spinner diameter="20" />
@@ -468,6 +591,16 @@ function buildRecipients(config: MonitorConfig): Recipient[] {
       font-size: 0.9rem;
       white-space: nowrap;
     }
+
+    .card-title-with-help {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .help-icon-button {
+      color: var(--mat-sys-on-surface-variant);
+    }
   `],
 })
 export class SettingsComponent implements OnInit {
@@ -477,6 +610,7 @@ export class SettingsComponent implements OnInit {
   private translate   = inject(TranslateService);
   private destroyRef  = inject(DestroyRef);
   private cdr         = inject(ChangeDetectorRef);
+  private dialog      = inject(MatDialog);
 
   /** True while the Firestore save operation is in flight. */
   readonly saving = signal(false);
@@ -496,27 +630,52 @@ export class SettingsComponent implements OnInit {
   /** Index of the recipient being edited, or null when adding a new one. */
   private editingIndex: number | null = null;
 
+  /** Current list of Telegram recipients managed outside the reactive form. */
+  readonly telegramRecipients = signal<TelegramRecipient[]>([]);
+
+  /** True when Telegram recipients have been modified since the last save or cancel. */
+  readonly telegramRecipientsDirty = signal(false);
+
+  /** Controls visibility of the inline add/edit Telegram recipient form. */
+  readonly showTelegramRecipientForm = signal(false);
+
+  /** Index of the Telegram recipient being edited, or null when adding a new one. */
+  private editingTelegramIndex: number | null = null;
+
   private savedFormValues = { ...FORM_DEFAULTS };
   private savedRecipients: Recipient[] = [];
+  private savedTelegramRecipients: TelegramRecipient[] = [];
 
-  readonly form = this.fb.group(
-    {
-      check_interval_minutes:   [FORM_DEFAULTS.check_interval_minutes,   [Validators.required, Validators.min(5), Validators.max(60)]],
-      max_minutes_without_data: [FORM_DEFAULTS.max_minutes_without_data, [Validators.required, Validators.min(1)]],
-      email_subject_down:       [FORM_DEFAULTS.email_subject_down,       Validators.required],
-      email_subject_up:         [FORM_DEFAULTS.email_subject_up,         Validators.required],
-      email_body_down:          [FORM_DEFAULTS.email_body_down,          Validators.required],
-      email_body_up:            [FORM_DEFAULTS.email_body_up,            Validators.required],
-      notify_on_down:           [FORM_DEFAULTS.notify_on_down],
-      notify_on_recovery:       [FORM_DEFAULTS.notify_on_recovery],
-    },
-    { validators: thresholdValidator },
-  );
+  /** Exposes the free `maskBotToken` function to the template. */
+  protected readonly maskBotToken = maskBotToken;
+
+  /** Exposes the default subject prefix to the template while the field is empty. */
+  protected readonly defaultSubjectPrefix = DEFAULT_SUBJECT_PREFIX;
+
+  readonly form = this.fb.group({
+    max_minutes_without_data: [FORM_DEFAULTS.max_minutes_without_data, [Validators.required, Validators.min(1)]],
+    email_subject_prefix:     [FORM_DEFAULTS.email_subject_prefix,     Validators.required],
+    email_subject_down:       [FORM_DEFAULTS.email_subject_down,       Validators.required],
+    email_subject_up:         [FORM_DEFAULTS.email_subject_up,         Validators.required],
+    email_body_down:          [FORM_DEFAULTS.email_body_down,          Validators.required],
+    email_body_up:            [FORM_DEFAULTS.email_body_up,            Validators.required],
+    notify_on_down:           [FORM_DEFAULTS.notify_on_down],
+    notify_on_recovery:       [FORM_DEFAULTS.notify_on_recovery],
+    notify_telegram_on_down:      [FORM_DEFAULTS.notify_telegram_on_down],
+    notify_telegram_on_recovery:  [FORM_DEFAULTS.notify_telegram_on_recovery],
+  });
 
   /** Separate form group for the inline add/edit recipient panel. */
   readonly addForm = this.fb.group({
     email: ['', [Validators.required, Validators.email]],
     name:  ['', Validators.required],
+  });
+
+  /** Separate form group for the inline add/edit Telegram recipient panel. */
+  readonly addTelegramForm = this.fb.group({
+    name:      ['', Validators.required],
+    bot_token: ['', [Validators.required, Validators.pattern(TELEGRAM_BOT_TOKEN_PATTERN)]],
+    chat_id:   ['', [Validators.required, Validators.pattern(TELEGRAM_CHAT_ID_PATTERN)]],
   });
 
   /**
@@ -535,20 +694,29 @@ export class SettingsComponent implements OnInit {
       this.recipients.set(recipientList);
       this.savedRecipients = [...recipientList];
 
+      const telegramRecipientList = config?.telegram_recipients ?? [];
+      this.telegramRecipients.set(telegramRecipientList);
+      this.savedTelegramRecipients = [...telegramRecipientList];
+
+      const subjectPrefix = config?.email_subject_prefix || FORM_DEFAULTS.email_subject_prefix;
+
       this.savedFormValues = {
-        check_interval_minutes:   config?.check_interval_minutes   ?? FORM_DEFAULTS.check_interval_minutes,
         max_minutes_without_data: config?.max_minutes_without_data ?? FORM_DEFAULTS.max_minutes_without_data,
-        email_subject_down:       stripSubjectPrefix(config?.email_subject_down ?? (SUBJECT_PREFIX + FORM_DEFAULTS.email_subject_down)),
-        email_subject_up:         stripSubjectPrefix(config?.email_subject_up   ?? (SUBJECT_PREFIX + FORM_DEFAULTS.email_subject_up)),
+        email_subject_prefix:     subjectPrefix,
+        email_subject_down:       stripSubjectPrefix(config?.email_subject_down ?? (buildSubjectPrefixMarker(subjectPrefix) + FORM_DEFAULTS.email_subject_down), subjectPrefix),
+        email_subject_up:         stripSubjectPrefix(config?.email_subject_up   ?? (buildSubjectPrefixMarker(subjectPrefix) + FORM_DEFAULTS.email_subject_up), subjectPrefix),
         email_body_down:          config?.email_body_down          ?? FORM_DEFAULTS.email_body_down,
         email_body_up:            config?.email_body_up            ?? FORM_DEFAULTS.email_body_up,
         notify_on_down:           config?.notify_on_down           ?? FORM_DEFAULTS.notify_on_down,
         notify_on_recovery:       config?.notify_on_recovery       ?? FORM_DEFAULTS.notify_on_recovery,
+        notify_telegram_on_down:      config?.notify_telegram_on_down     ?? FORM_DEFAULTS.notify_telegram_on_down,
+        notify_telegram_on_recovery:  config?.notify_telegram_on_recovery ?? FORM_DEFAULTS.notify_telegram_on_recovery,
       };
 
       this.form.patchValue(this.savedFormValues);
       this.form.markAsPristine();
       this.recipientsDirty.set(false);
+      this.telegramRecipientsDirty.set(false);
 
       if (config?.updated_at) {
         this.lastUpdated.set(formatTimestamp(config.updated_at));
@@ -570,36 +738,46 @@ export class SettingsComponent implements OnInit {
     try {
       const raw = this.form.getRawValue();
       const recipientList = this.recipients();
+      const telegramRecipientList = this.telegramRecipients();
+      const subjectPrefix = raw.email_subject_prefix || FORM_DEFAULTS.email_subject_prefix;
+      const subjectPrefixMarker = buildSubjectPrefixMarker(subjectPrefix);
 
       const values: Omit<MonitorConfig, 'updated_at' | 'alert_email'> = {
-        check_interval_minutes:   Number(raw.check_interval_minutes),
         max_minutes_without_data: Number(raw.max_minutes_without_data),
         alert_emails:             recipientList.map(r => r.email),
         recipient_names:          Object.fromEntries(recipientList.map(r => [r.email, r.name])),
-        email_subject_down:       SUBJECT_PREFIX + (raw.email_subject_down ?? FORM_DEFAULTS.email_subject_down),
-        email_subject_up:         SUBJECT_PREFIX + (raw.email_subject_up   ?? FORM_DEFAULTS.email_subject_up),
+        email_subject_prefix:     subjectPrefix,
+        email_subject_down:       subjectPrefixMarker + (raw.email_subject_down ?? FORM_DEFAULTS.email_subject_down),
+        email_subject_up:         subjectPrefixMarker + (raw.email_subject_up   ?? FORM_DEFAULTS.email_subject_up),
         email_body_down:          raw.email_body_down    ?? DEFAULT_BODY_DOWN,
         email_body_up:            raw.email_body_up      ?? DEFAULT_BODY_UP,
         notify_on_down:           raw.notify_on_down     ?? true,
         notify_on_recovery:       raw.notify_on_recovery ?? true,
+        telegram_recipients:          telegramRecipientList,
+        notify_telegram_on_down:      raw.notify_telegram_on_down     ?? true,
+        notify_telegram_on_recovery:  raw.notify_telegram_on_recovery ?? true,
       };
 
       await this.dataService.saveConfig(values);
 
       this.savedFormValues = {
-        check_interval_minutes:   values.check_interval_minutes,
         max_minutes_without_data: values.max_minutes_without_data,
-        email_subject_down:       stripSubjectPrefix(values.email_subject_down),
-        email_subject_up:         stripSubjectPrefix(values.email_subject_up),
+        email_subject_prefix:     values.email_subject_prefix,
+        email_subject_down:       stripSubjectPrefix(values.email_subject_down, values.email_subject_prefix),
+        email_subject_up:         stripSubjectPrefix(values.email_subject_up, values.email_subject_prefix),
         email_body_down:          values.email_body_down,
         email_body_up:            values.email_body_up,
         notify_on_down:           values.notify_on_down,
         notify_on_recovery:       values.notify_on_recovery,
+        notify_telegram_on_down:      values.notify_telegram_on_down,
+        notify_telegram_on_recovery:  values.notify_telegram_on_recovery,
       };
       this.savedRecipients = [...recipientList];
+      this.savedTelegramRecipients = [...telegramRecipientList];
       this.lastUpdated.set(formatTimestamp(Timestamp.fromDate(new Date())));
       this.form.markAsPristine();
       this.recipientsDirty.set(false);
+      this.telegramRecipientsDirty.set(false);
       this.snackBar.open(this.translate.instant('SETTINGS.SAVE_SUCCESS'), '', { duration: 3000 });
     } catch {
       this.snackBar.open(this.translate.instant('SETTINGS.SAVE_ERROR'), '', { duration: 4000 });
@@ -619,6 +797,9 @@ export class SettingsComponent implements OnInit {
     this.recipients.set([...this.savedRecipients]);
     this.recipientsDirty.set(false);
     this.showRecipientForm.set(false);
+    this.telegramRecipients.set([...this.savedTelegramRecipients]);
+    this.telegramRecipientsDirty.set(false);
+    this.showTelegramRecipientForm.set(false);
     this.cdr.markForCheck();
   }
 
@@ -678,5 +859,80 @@ export class SettingsComponent implements OnInit {
     this.recipients.set(this.recipients().filter((_, i) => i !== index));
     this.recipientsDirty.set(true);
     this.cdr.markForCheck();
+  }
+
+  /**
+   * Opens the inline Telegram recipient form in "add" mode with empty fields.
+   */
+  openAddTelegramRecipient(): void {
+    this.editingTelegramIndex = null;
+    this.addTelegramForm.reset({ name: '', bot_token: '', chat_id: '' });
+    this.showTelegramRecipientForm.set(true);
+  }
+
+  /**
+   * Opens the inline Telegram recipient form pre-filled with the selected recipient's data.
+   *
+   * @param index - Index of the Telegram recipient to edit in the telegramRecipients signal.
+   */
+  openEditTelegramRecipient(index: number): void {
+    const r = this.telegramRecipients()[index];
+    this.editingTelegramIndex = index;
+    this.addTelegramForm.patchValue({ name: r.name, bot_token: r.bot_token, chat_id: r.chat_id });
+    this.showTelegramRecipientForm.set(true);
+  }
+
+  /**
+   * Confirms the add/edit form and updates the telegramRecipients signal.
+   * Replaces the existing entry when editing, appends when adding.
+   */
+  confirmTelegramRecipient(): void {
+    if (this.addTelegramForm.invalid) return;
+    const { name, bot_token, chat_id } = this.addTelegramForm.getRawValue();
+    const current = [...this.telegramRecipients()];
+    if (this.editingTelegramIndex !== null) {
+      current[this.editingTelegramIndex] = { name: name!, bot_token: bot_token!, chat_id: chat_id! };
+    } else {
+      current.push({ name: name!, bot_token: bot_token!, chat_id: chat_id! });
+    }
+    this.telegramRecipients.set(current);
+    this.telegramRecipientsDirty.set(true);
+    this.showTelegramRecipientForm.set(false);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Closes the inline Telegram recipient form without saving changes.
+   */
+  cancelTelegramRecipientForm(): void {
+    this.showTelegramRecipientForm.set(false);
+  }
+
+  /**
+   * Removes a Telegram recipient from the list by index.
+   *
+   * @param index - Index of the Telegram recipient to remove.
+   */
+  removeTelegramRecipient(index: number): void {
+    this.telegramRecipients.set(this.telegramRecipients().filter((_, i) => i !== index));
+    this.telegramRecipientsDirty.set(true);
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Opens the Telegram bot setup help dialog.
+   */
+  openTelegramHelp(): void {
+    this.dialog.open(TelegramHelpDialogComponent);
+  }
+
+  /**
+   * Opens the Telegram getUpdates endpoint for the bot token currently typed in the
+   * add/edit form, in a new tab, so the user can read their chat_id from the JSON response.
+   */
+  openTelegramGetUpdates(): void {
+    const botToken = this.addTelegramForm.get('bot_token')?.value;
+    if (!botToken) return;
+    window.open(`${TELEGRAM_API_BASE}/bot${botToken}/getUpdates`, '_blank', 'noopener,noreferrer');
   }
 }

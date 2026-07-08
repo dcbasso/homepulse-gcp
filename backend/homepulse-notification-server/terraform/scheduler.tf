@@ -4,9 +4,10 @@
 # Uses OIDC authentication so the function can verify the caller identity
 # without exposing the endpoint publicly beyond the IAM invoker binding.
 #
-# Note: changing check_interval_minutes in the Settings UI does NOT update
-# this schedule automatically. Changing the cadence requires re-running
-# `terraform apply` with a new variable value (or editing manually in Console).
+# Note: the "schedule" below is the single source of truth for check cadence —
+# there is no equivalent control in the Settings UI. Changing the cadence
+# requires editing this value and re-running `terraform apply` (or editing
+# manually in Console).
 # ---------------------------------------------------------------------------
 
 resource "google_cloud_scheduler_job" "check_internet_status" {
