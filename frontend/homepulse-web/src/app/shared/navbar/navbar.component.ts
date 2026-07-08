@@ -4,13 +4,24 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatMenuModule } from '@angular/material/menu';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { map } from 'rxjs';
 import { AuthService } from '../../core/auth.service';
 import { ThemeService } from '../../core/theme.service';
 
-/** Languages available in the UI, in the order the toggle cycles through them. */
-const SUPPORTED_LANGS = ['pt-BR', 'en', 'es'] as const;
+/** A UI language option: the ngx-translate locale code paired with its display badge. */
+interface LangOption {
+  code: 'pt-BR' | 'en' | 'es';
+  badge: string;
+}
+
+/** Languages available in the UI, in the order they appear in the selector menu. */
+const SUPPORTED_LANGS: readonly LangOption[] = [
+  { code: 'pt-BR', badge: 'PT-BR' },
+  { code: 'en', badge: 'ENG' },
+  { code: 'es', badge: 'ESP' },
+];
 
 /**
  * Top navigation bar shown on all authenticated screens.
@@ -21,7 +32,15 @@ const SUPPORTED_LANGS = ['pt-BR', 'en', 'es'] as const;
   selector: 'app-navbar',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MatToolbarModule, MatButtonModule, MatIconModule, RouterLink, RouterLinkActive, TranslatePipe],
+  imports: [
+    MatToolbarModule,
+    MatButtonModule,
+    MatIconModule,
+    MatMenuModule,
+    RouterLink,
+    RouterLinkActive,
+    TranslatePipe,
+  ],
   template: `
     <mat-toolbar class="navbar">
       <span class="app-title">{{ 'LOGIN.TITLE' | translate }}</span>
@@ -46,9 +65,25 @@ const SUPPORTED_LANGS = ['pt-BR', 'en', 'es'] as const;
         </a>
       </nav>
       <span class="spacer"></span>
-      <button mat-icon-button (click)="toggleLang()" [attr.aria-label]="currentLang()">
+      <button
+        mat-stroked-button
+        class="lang-selector"
+        [matMenuTriggerFor]="langMenu"
+        [attr.aria-label]="'NAV.LANGUAGE' | translate"
+      >
         <mat-icon>language</mat-icon>
+        <span>{{ currentLangBadge() }}</span>
       </button>
+      <mat-menu #langMenu="matMenu">
+        @for (lang of langOptions; track lang.code) {
+          <button mat-menu-item (click)="setLang(lang.code)" [class.active-lang]="lang.code === currentLang()">
+            @if (lang.code === currentLang()) {
+              <mat-icon>check</mat-icon>
+            }
+            <span>{{ lang.badge }}</span>
+          </button>
+        }
+      </mat-menu>
       <button mat-icon-button (click)="themeService.toggleTheme()" aria-label="Toggle theme">
         <mat-icon>{{ isDark() ? 'light_mode' : 'dark_mode' }}</mat-icon>
       </button>
@@ -76,12 +111,23 @@ const SUPPORTED_LANGS = ['pt-BR', 'en', 'es'] as const;
     .nav-links { display: flex; gap: 0.25rem; }
     .spacer { flex: 1; }
     .active-link { font-weight: 700; }
+    .lang-selector {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      border-radius: 999px;
+      margin-right: 0.5rem;
+    }
+    .active-lang { font-weight: 700; }
   `],
 })
 export class NavbarComponent {
   protected themeService = inject(ThemeService);
   private authService = inject(AuthService);
   private translate = inject(TranslateService);
+
+  /** Language options shown in the selector menu. */
+  protected langOptions = SUPPORTED_LANGS;
 
   /** Reactive dark-mode flag derived from ThemeService. */
   protected isDark = toSignal(this.themeService.isDark$, { initialValue: false });
@@ -92,14 +138,17 @@ export class NavbarComponent {
     { initialValue: 'pt-BR' },
   );
 
+  /** Display badge (e.g. "PT-BR") for the currently active language. */
+  protected currentLangBadge(): string {
+    return SUPPORTED_LANGS.find(lang => lang.code === this.currentLang())?.badge ?? '';
+  }
+
   /**
-   * Cycles the UI language through the supported locales and persists the choice.
+   * Switches the UI to the given language and persists the choice.
    */
-  toggleLang(): void {
-    const currentIndex = SUPPORTED_LANGS.indexOf(this.currentLang() as (typeof SUPPORTED_LANGS)[number]);
-    const next = SUPPORTED_LANGS[(currentIndex + 1) % SUPPORTED_LANGS.length];
-    this.translate.use(next);
-    localStorage.setItem('lang', next);
+  setLang(code: LangOption['code']): void {
+    this.translate.use(code);
+    localStorage.setItem('lang', code);
   }
 
   /**
