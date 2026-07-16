@@ -563,22 +563,28 @@ def check_internet_status(request) -> tuple[str, int]:
                     _create_incident(db)
                     _write_monitor_state(db, internet_down=True, consecutive_down_checks=consecutive_down_checks)
                     if config.notify_on_down:
-                        for recipient in config.recipients:
-                            _send_down_alert(
-                                recipient=recipient,
-                                last_timestamp=last_timestamp,
-                                diff_minutes=diff_minutes,
-                                subject=config.subject_down,
-                                body_template=config.body_down,
-                            )
+                        try:
+                            for recipient in config.recipients:
+                                _send_down_alert(
+                                    recipient=recipient,
+                                    last_timestamp=last_timestamp,
+                                    diff_minutes=diff_minutes,
+                                    subject=config.subject_down,
+                                    body_template=config.body_down,
+                                )
+                        except Exception as e:
+                            logger.error("Email down-alert failed: %s", e)
                     if config.notify_telegram_on_down:
-                        for recipient in config.telegram_recipients:
-                            _send_telegram_down_alert(
-                                recipient=recipient,
-                                last_timestamp=last_timestamp,
-                                subject=config.subject_down,
-                                body_template=config.body_down,
-                            )
+                        try:
+                            for recipient in config.telegram_recipients:
+                                _send_telegram_down_alert(
+                                    recipient=recipient,
+                                    last_timestamp=last_timestamp,
+                                    subject=config.subject_down,
+                                    body_template=config.body_down,
+                                )
+                        except Exception as e:
+                            logger.error("Telegram down-alert failed: %s", e)
                 else:
                     logger.info(
                         "Possible outage detected (%d/%d consecutive checks) — awaiting confirmation before alerting",
@@ -592,25 +598,31 @@ def check_internet_status(request) -> tuple[str, int]:
                 started_at, duration_minutes = _close_latest_incident(db)
                 _write_monitor_state(db, internet_down=False, consecutive_down_checks=0)
                 if config.notify_on_recovery:
-                    for recipient in config.recipients:
-                        _send_recovery_alert(
-                            recipient=recipient,
-                            recovery_timestamp=last_timestamp,
-                            started_at=started_at,
-                            duration_minutes=duration_minutes,
-                            subject=config.subject_up,
-                            body_template=config.body_up,
-                        )
+                    try:
+                        for recipient in config.recipients:
+                            _send_recovery_alert(
+                                recipient=recipient,
+                                recovery_timestamp=last_timestamp,
+                                started_at=started_at,
+                                duration_minutes=duration_minutes,
+                                subject=config.subject_up,
+                                body_template=config.body_up,
+                            )
+                    except Exception as e:
+                        logger.error("Email recovery-alert failed: %s", e)
                 if config.notify_telegram_on_recovery:
-                    for recipient in config.telegram_recipients:
-                        _send_telegram_recovery_alert(
-                            recipient=recipient,
-                            recovery_timestamp=last_timestamp,
-                            started_at=started_at,
-                            duration_minutes=duration_minutes,
-                            subject=config.subject_up,
-                            body_template=config.body_up,
-                        )
+                    try:
+                        for recipient in config.telegram_recipients:
+                            _send_telegram_recovery_alert(
+                                recipient=recipient,
+                                recovery_timestamp=last_timestamp,
+                                started_at=started_at,
+                                duration_minutes=duration_minutes,
+                                subject=config.subject_up,
+                                body_template=config.body_up,
+                            )
+                    except Exception as e:
+                        logger.error("Telegram recovery-alert failed: %s", e)
             else:
                 if consecutive_down_checks:
                     _write_down_check_counter(db, 0)
