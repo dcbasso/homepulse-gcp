@@ -43,6 +43,7 @@ const SUPPORTED_LANGS: readonly LangOption[] = [
   ],
   template: `
     <mat-toolbar class="navbar">
+      <img class="app-logo" src="assets/images/logo/logo-icon.png" alt="" />
       <span class="app-title">{{ 'LOGIN.TITLE' | translate }}</span>
       <nav class="nav-links">
         <a mat-button routerLink="/dashboard" routerLinkActive="active-link">
@@ -101,6 +102,11 @@ const SUPPORTED_LANGS: readonly LangOption[] = [
       color: var(--mat-sys-on-surface);
       border-bottom: 1px solid var(--mat-sys-outline-variant);
       box-shadow: none;
+    }
+    .app-logo {
+      height: 28px;
+      width: 28px;
+      margin-right: 0.5rem;
     }
     .app-title {
       font-weight: 700;

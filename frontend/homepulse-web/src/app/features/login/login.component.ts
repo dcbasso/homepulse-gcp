@@ -29,7 +29,7 @@ import { AuthService } from '../../core/auth.service';
   template: `
     <div class="login-page">
       <div class="login-card">
-        <h1 class="login-title">{{ 'LOGIN.TITLE' | translate }}</h1>
+        <img class="login-logo" src="assets/images/logo/logo-full-400w.png" alt="HomePulse" />
         <p class="login-subtitle">{{ 'LOGIN.SUBTITLE' | translate }}</p>
 
         <button
@@ -78,12 +78,10 @@ import { AuthService } from '../../core/auth.service';
       min-width: 320px;
     }
 
-    .login-title {
-      margin: 0;
-      font-size: 1.75rem;
-      font-weight: 600;
-      color: var(--mat-sys-on-surface);
-      letter-spacing: -0.5px;
+    .login-logo {
+      width: 220px;
+      max-width: 100%;
+      margin: 0 0 0.5rem;
     }
 
     .login-subtitle {
