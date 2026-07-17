@@ -13,6 +13,7 @@ const AUTHOR = {
   email: 'dcbasso@gmail.com',
   github: 'https://github.com/dcbasso/homepulse-gcp',
   linkedin: 'https://www.linkedin.com/in/dante-basso-filho',
+  personalSite: 'https://www.dantebasso.com.br/',
 };
 
 /**
@@ -37,7 +38,9 @@ const AUTHOR = {
           <mat-card-title>{{ 'ABOUT.SECTION_APP' | translate }}</mat-card-title>
         </mat-card-header>
         <mat-card-content>
+          <img class="about-logo" src="assets/images/logo/logo-full-400w.png" alt="HomePulse" />
           <p class="app-name">{{ 'ABOUT.APP_NAME' | translate }}</p>
+          <p class="app-made-by">{{ 'ABOUT.MADE_BY' | translate }}</p>
           <p class="app-description">{{ 'ABOUT.APP_DESCRIPTION' | translate }}</p>
           <p class="app-version">{{ 'ABOUT.APP_VERSION' | translate }}: {{ appVersion }}</p>
           <p class="app-license">
@@ -68,6 +71,10 @@ const AUTHOR = {
             <mat-icon>work</mat-icon>
             <a [href]="author.linkedin" target="_blank" rel="noopener">{{ 'ABOUT.AUTHOR_LINKEDIN' | translate }}</a>
           </div>
+          <div class="info-row">
+            <mat-icon>language</mat-icon>
+            <a [href]="author.personalSite" target="_blank" rel="noopener">{{ 'ABOUT.AUTHOR_WEBSITE' | translate }}</a>
+          </div>
         </mat-card-content>
       </mat-card>
     </main>
@@ -97,9 +104,21 @@ const AUTHOR = {
       padding-top: 1rem !important;
     }
 
+    .about-logo {
+      width: 160px;
+      max-width: 100%;
+      margin: 0 0 0.5rem;
+    }
+
     .app-name {
       font-weight: 600;
       margin: 0;
+    }
+
+    .app-made-by {
+      font-size: 0.85rem;
+      color: var(--mat-sys-on-surface-variant);
+      margin: 0 0 0.25rem;
     }
 
     .app-description {

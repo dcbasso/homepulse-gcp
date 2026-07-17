@@ -142,6 +142,7 @@
     "TITLE": "Sobre",
     "SECTION_APP": "Sobre o app",
     "APP_NAME": "HomePulse",
+    "MADE_BY": "Feito por Dante Basso",
     "APP_DESCRIPTION": "Monitora sua conexão com a internet e avisa quando ela cair.",
     "APP_VERSION": "Versão",
     "APP_LICENSE": "Licença",
@@ -149,6 +150,7 @@
     "AUTHOR_NAME": "Nome",
     "AUTHOR_EMAIL": "E-mail",
     "AUTHOR_GITHUB": "GitHub",
-    "AUTHOR_LINKEDIN": "LinkedIn"
+    "AUTHOR_LINKEDIN": "LinkedIn",
+    "AUTHOR_WEBSITE": "Site pessoal"
   }
 }
