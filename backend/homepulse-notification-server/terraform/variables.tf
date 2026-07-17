@@ -16,6 +16,12 @@ variable "region" {
   description = "GCP region for Cloud Function and Cloud Scheduler"
 }
 
+variable "whoami_region" {
+  type        = string
+  default     = "us-central1"
+  description = "GCP region for the whoami function. Must be a region that supports Cloud Run domain mappings (southamerica-east1 does not), since this function is exposed under a custom domain."
+}
+
 variable "alert_email" {
   type        = string
   description = "Gmail address that receives up/down alert emails"

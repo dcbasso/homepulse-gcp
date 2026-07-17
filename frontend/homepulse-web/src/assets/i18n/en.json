@@ -7,7 +7,9 @@
   "LOGIN": {
     "TITLE": "HomePulse",
     "SUBTITLE": "Track the stability of your connection",
-    "BUTTON": "Sign in with Google"
+    "BUTTON": "Sign in with Google",
+    "ERROR_DENIED": "Access denied. You are not authorized to use this app.",
+    "ERROR_GENERIC": "Something went wrong while signing in. Please try again."
   },
   "NAV": {
     "DASHBOARD": "Dashboard",

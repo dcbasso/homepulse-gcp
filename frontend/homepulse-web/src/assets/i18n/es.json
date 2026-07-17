@@ -7,7 +7,9 @@
   "LOGIN": {
     "TITLE": "HomePulse",
     "SUBTITLE": "Controla la estabilidad de tu conexión",
-    "BUTTON": "Iniciar sesión con Google"
+    "BUTTON": "Iniciar sesión con Google",
+    "ERROR_DENIED": "Acceso denegado. No tienes autorización para usar esta app.",
+    "ERROR_GENERIC": "Algo salió mal al iniciar sesión. Inténtalo de nuevo."
   },
   "NAV": {
     "DASHBOARD": "Panel",

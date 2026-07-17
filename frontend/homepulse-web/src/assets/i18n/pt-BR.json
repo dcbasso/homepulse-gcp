@@ -7,7 +7,9 @@
   "LOGIN": {
     "TITLE": "HomePulse",
     "SUBTITLE": "Acompanhe a estabilidade da sua conexão",
-    "BUTTON": "Entrar com Google"
+    "BUTTON": "Entrar com Google",
+    "ERROR_DENIED": "Acesso negado. Você não está autorizado a usar este app.",
+    "ERROR_GENERIC": "Algo deu errado ao entrar. Tente novamente."
   },
   "NAV": {
     "DASHBOARD": "Dashboard",
