@@ -131,7 +131,7 @@ resource "google_cloud_run_service_iam_member" "function_invoker" {
 
 resource "google_cloudfunctions2_function" "whoami" {
   name     = "whoami"
-  location = var.region
+  location = var.whoami_region
 
   labels = local.common_labels
 
@@ -169,7 +169,7 @@ resource "google_cloudfunctions2_function" "whoami" {
 
 resource "google_cloud_run_service_iam_member" "whoami_invoker" {
   project  = var.project_id
-  location = var.region
+  location = var.whoami_region
   service  = google_cloudfunctions2_function.whoami.name
   role     = "roles/run.invoker"
   member   = "allUsers"

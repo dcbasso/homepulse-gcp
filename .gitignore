@@ -27,6 +27,7 @@ client/homepulse-client/config.json
 **/terraform/.terraform.lock.hcl
 **/terraform/terraform.tfstate
 **/terraform/terraform.tfstate.backup
+**/terraform/tfplan
 
 # Ambientes Angular — valores reais ficam em deploy/
 frontend/homepulse-web/src/environments/environment.ts
