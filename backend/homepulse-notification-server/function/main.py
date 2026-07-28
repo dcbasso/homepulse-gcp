@@ -1,6 +1,6 @@
 """Cloud Function — Internet Monitor.
 
-Triggered by Cloud Scheduler every 5 minutes. Reads the latest heartbeat
+Triggered by Cloud Scheduler every minute. Reads the latest heartbeat
 document from Firestore, compares its timestamp against a configurable
 threshold, and sends Gmail alerts on state transitions (up→down, down→up).
 Incident records are persisted in Firestore.

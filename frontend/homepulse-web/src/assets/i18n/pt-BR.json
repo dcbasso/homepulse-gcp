@@ -92,9 +92,9 @@
   "SETTINGS": {
     "TITLE": "Configurações",
     "SECTION_CHECK": "Verificação de status",
-    "FIXED_INTERVAL_INFO": "Verificação automática a cada 5 minutos",
+    "FIXED_INTERVAL_INFO": "Verificação automática a cada 1 minuto",
     "FIELD_THRESHOLD": "Minutos sem dados para disparar alerta",
-    "FIELD_THRESHOLD_HINT": "O alerta dispara após 2 checagens consecutivas acima deste valor",
+    "FIELD_THRESHOLD_HINT": "O alerta dispara após 2 checagens consecutivas (1 minuto entre elas) acima deste valor — a detecção total leva, no pior caso, esse valor mais até 2 minutos",
     "SECTION_EMAIL": "Notificações por email",
     "SECTION_RECIPIENTS": "Destinatários",
     "ADD_RECIPIENT": "Adicionar destinatário",
