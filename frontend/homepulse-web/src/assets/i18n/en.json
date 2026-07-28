@@ -92,9 +92,9 @@
   "SETTINGS": {
     "TITLE": "Settings",
     "SECTION_CHECK": "Status check",
-    "FIXED_INTERVAL_INFO": "Automatic check every 5 minutes",
+    "FIXED_INTERVAL_INFO": "Automatic check every 1 minute",
     "FIELD_THRESHOLD": "Minutes without data to trigger alert",
-    "FIELD_THRESHOLD_HINT": "Alert fires after 2 consecutive checks above this value",
+    "FIELD_THRESHOLD_HINT": "Alert fires after 2 consecutive checks (1 minute apart) above this value — worst-case total detection time is this value plus up to 2 minutes",
     "SECTION_EMAIL": "Email notifications",
     "SECTION_RECIPIENTS": "Recipients",
     "ADD_RECIPIENT": "Add recipient",

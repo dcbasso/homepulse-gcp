@@ -1,19 +1,20 @@
 # ---------------------------------------------------------------------------
-# Cloud Scheduler job — triggers the Cloud Function every 5 minutes
+# Cloud Scheduler job — triggers the Cloud Function every minute
 #
 # Uses OIDC authentication so the function can verify the caller identity
 # without exposing the endpoint publicly beyond the IAM invoker binding.
 #
 # Note: the "schedule" below is the single source of truth for check cadence —
 # there is no equivalent control in the Settings UI. Changing the cadence
-# requires editing this value and re-running `terraform apply` (or editing
+# requires editing this value, updating SETTINGS.FIXED_INTERVAL_INFO in the
+# three i18n files to match, and re-running `terraform apply` (or editing
 # manually in Console).
 # ---------------------------------------------------------------------------
 
 resource "google_cloud_scheduler_job" "check_internet_status" {
   name        = "check-internet-status"
   description = "Triggers the Cloud Function to check for recent heartbeat data"
-  schedule    = "*/5 * * * *"
+  schedule    = "* * * * *"
   time_zone   = "America/Sao_Paulo"
   region      = var.region
 
