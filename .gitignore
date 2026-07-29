@@ -18,6 +18,9 @@
 # Configurações locais com credenciais (commitar apenas o .example)
 client/homepulse-client/config.json
 
+# OAuth client credentials used by the one-off refresh-token script
+backend/homepulse-notification-server/scripts/client_secret.json
+
 # Firebase
 **/.firebase/
 

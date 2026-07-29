@@ -2,7 +2,7 @@
 
 Home internet connection monitor — GCP implementation.
 
-Runs a speedtest on a local machine on a schedule, stores results in Firestore, sends email alerts on outages, and exposes a web dashboard for historical analysis.
+Runs a speedtest on a local machine on a schedule, stores results in Firestore, sends Gmail and/or Telegram alerts on outages, and exposes a web dashboard for historical analysis.
 
 Project page: https://www.dantebasso.com.br/opensource/homepulse-gcp
 
@@ -24,13 +24,23 @@ Project page: https://www.dantebasso.com.br/opensource/homepulse-gcp
                                Cloud Scheduler (every N min)
                                         │
                     backend/homepulse-notification-server (Python)
-                                        └─ Gmail API → alert / recovery email
+                                        ├─ Gmail API      → alert / recovery email
+                                        └─ Telegram Bot API → alert / recovery message
                                         │
                     frontend/homepulse-web (Angular)
                                         └─ Firebase Hosting
                                         └─ Firebase Auth (Google Sign-In)
                                         └─ reads Firestore directly (client SDK)
 ```
+
+## Alert Channels
+
+Outage/recovery notifications can be sent through two independent channels, both configurable per-recipient from the dashboard's Settings screen:
+
+- **Gmail** — via the Gmail API, using an OAuth2 refresh token (see [Gmail OAuth](#gmail-oauth--publishing-status-gotcha) below).
+- **Telegram** — via the Telegram Bot API. Each recipient stores a `bot_token` (from [@BotFather](https://t.me/BotFather)) and a `chat_id`. No OAuth or token refresh involved — a Telegram bot token doesn't expire, which makes it a good fallback for when the Gmail token gets stuck in "Testing" mode (see the gotcha below).
+
+Recipients and channel toggles (`notify_telegram_on_down`, `notify_telegram_on_recovery`, etc.) are read from the monitor config document in Firestore; see [backend/homepulse-notification-server/function/main.py](backend/homepulse-notification-server/function/main.py) for the full alerting logic.
 
 ## Getting Started
 
@@ -53,39 +63,14 @@ Symptom in Cloud Function logs: `Email down-alert failed: ('invalid_grant: Bad R
 
 **Regenerating the refresh token** (needed once at initial setup, or again if it's ever revoked/expired):
 
-1. In GCP Console → APIs & Services → Clients, download the OAuth2 client credentials JSON for the Gmail API client and save it as `client_secret.json` inside `backend/homepulse-notification-server/deploy/` (this file is gitignored — never commit it).
-2. Install the OAuth flow dependency and run the helper script:
+1. In GCP Console → APIs & Services → Clients, download the OAuth2 client credentials JSON for the Gmail API client and save it as `client_secret.json` inside `backend/homepulse-notification-server/scripts/` (this file is gitignored — never commit it).
+2. Install the OAuth flow dependency and run the helper script (committed at [backend/homepulse-notification-server/scripts/get_refresh_token.py](backend/homepulse-notification-server/scripts/get_refresh_token.py)):
    ```bash
-   cd backend/homepulse-notification-server/deploy
+   cd backend/homepulse-notification-server/scripts
    pip install --user google-auth-oauthlib
    python3 get_refresh_token.py
    ```
    A browser window opens — sign in with the alert-sending Google account and grant the `gmail.send` permission. The script prints the new `refresh_token`, `client_id`, and `client_secret`.
-
-   If `get_refresh_token.py` is missing from your local `deploy/` folder (it lives there, which is gitignored), recreate it:
-   ```python
-   """One-time script to obtain the Gmail OAuth2 refresh token.
-
-   Usage: place client_secret.json in this same folder, then run this script.
-   A browser window opens — sign in and grant permission. Copy the printed
-   refresh_token into Secret Manager (see README "Gmail OAuth" section).
-   """
-   import os
-   from google_auth_oauthlib.flow import InstalledAppFlow
-
-   SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-   SECRET_FILE = os.path.join(os.path.dirname(__file__), "client_secret.json")
-
-   def main() -> None:
-       flow = InstalledAppFlow.from_client_secrets_file(SECRET_FILE, scopes=SCOPES)
-       creds = flow.run_local_server(port=0)
-       print(f"refresh_token: {creds.refresh_token}")
-       print(f"client_id:     {creds.client_id}")
-       print(f"client_secret: {creds.client_secret}")
-
-   if __name__ == "__main__":
-       main()
-   ```
 3. Store the new token in Secret Manager:
    ```bash
    echo -n "NEW_REFRESH_TOKEN" | gcloud secrets versions add gmail-refresh-token --project=<PROJECT_ID> --data-file=-
