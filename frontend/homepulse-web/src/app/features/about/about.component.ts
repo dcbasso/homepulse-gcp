@@ -5,7 +5,7 @@ import { TranslatePipe } from '@ngx-translate/core';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 
 /** Current application version, shown on the About screen. */
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '3.0.0';
 
 /** Author contact and profile links, shown on the About screen. */
 const AUTHOR = {
@@ -28,8 +28,7 @@ const AUTHOR = {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [NavbarComponent, MatCardModule, MatIconModule, TranslatePipe],
   template: `
-    <app-navbar />
-
+    <app-navbar>
     <main class="about-main">
       <h1 class="about-title">{{ 'ABOUT.TITLE' | translate }}</h1>
 
@@ -78,6 +77,7 @@ const AUTHOR = {
         </mat-card-content>
       </mat-card>
     </main>
+    </app-navbar>
   `,
   styles: [`
     .about-main {

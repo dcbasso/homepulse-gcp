@@ -1,11 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  OnInit,
-  OutputEmitterRef,
-  input,
-  output,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatNativeDateModule } from '@angular/material/core';
@@ -14,37 +7,15 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSelectModule } from '@angular/material/select';
 import { TranslatePipe } from '@ngx-translate/core';
-
-/** Preset time window options for the period selector. */
-export type Period = '1h' | '3h' | '6h' | '12h' | '24h' | '7d' | '30d' | 'custom';
-
-/** A resolved start/end date pair used to query Firestore. */
-export interface DateRange {
-  start: Date;
-  end: Date;
-}
-
-/** Computes the concrete start/end dates for a preset period relative to now. */
-function rangeFromPeriod(period: Exclude<Period, 'custom'>): DateRange {
-  const end = new Date();
-  const start = new Date();
-  switch (period) {
-    case '1h':  start.setHours(start.getHours() - 1);    break;
-    case '3h':  start.setHours(start.getHours() - 3);    break;
-    case '6h':  start.setHours(start.getHours() - 6);    break;
-    case '12h': start.setHours(start.getHours() - 12);   break;
-    case '24h': start.setDate(start.getDate() - 1);       break;
-    case '7d':  start.setDate(start.getDate() - 7);       break;
-    case '30d': start.setDate(start.getDate() - 30);      break;
-  }
-  return { start, end };
-}
+import { FilterService } from '../../core/filter.service';
+import { Period } from '../../core/models/date-range.model';
 
 /**
  * Date range filter bar with preset options and a custom datepicker pair.
  *
- * Emits `filterChange` immediately when a preset is selected, or when
- * the user clicks Apply for a custom range.
+ * Reads and writes the global {@link FilterService} state directly, so the
+ * selected period stays in sync across every screen that renders this
+ * component during the session.
  */
 @Component({
   selector: 'app-date-range-filter',
@@ -110,44 +81,44 @@ function rangeFromPeriod(period: Exclude<Period, 'custom'>): DateRange {
   `],
 })
 export class DateRangeFilterComponent implements OnInit {
-  /** Emitted when the active date range changes (preset or custom apply). */
-  readonly filterChange: OutputEmitterRef<DateRange> = output<DateRange>();
+  private filterService = inject(FilterService);
 
-  /** Initial period to select and emit on init. Defaults to 24h. */
-  readonly defaultPeriod = input<Exclude<Period, 'custom'>>('24h');
-
-  selectedPeriod: Period = this.defaultPeriod();
+  selectedPeriod: Period = this.filterService.currentPeriod;
   customStart: Date | null = null;
   customEnd: Date | null = null;
 
   /**
-   * Emits the default range on init so the parent triggers its first
-   * data load without waiting for user interaction.
+   * Reads the currently active period/range from the shared FilterService
+   * so re-mounting this component (e.g. after SPA navigation) reflects the
+   * real current selection, including a 'custom' range.
    */
   ngOnInit(): void {
-    this.selectedPeriod = this.defaultPeriod();
-    this.filterChange.emit(rangeFromPeriod(this.defaultPeriod()));
+    this.selectedPeriod = this.filterService.currentPeriod;
+    if (this.selectedPeriod === 'custom') {
+      this.customStart = this.filterService.currentRange.start;
+      this.customEnd = this.filterService.currentRange.end;
+    }
   }
 
   /**
-   * Handles preset selection. Emits the resolved range immediately,
+   * Handles preset selection, updating the shared filter state immediately
    * unless the user switched to "custom" (which requires explicit Apply).
    *
    * @param period - The newly selected period option.
    */
   onPeriodChange(period: Period): void {
     if (period !== 'custom') {
-      this.filterChange.emit(rangeFromPeriod(period as Exclude<Period, 'custom'>));
+      this.filterService.setPeriod(period);
     }
   }
 
   /**
-   * Validates and emits the user-defined custom range.
+   * Validates and applies the user-defined custom range to the shared filter state.
    * No-ops if either date input is empty.
    */
   applyCustom(): void {
     if (this.customStart && this.customEnd) {
-      this.filterChange.emit({ start: this.customStart, end: this.customEnd });
+      this.filterService.setCustomRange({ start: this.customStart, end: this.customEnd });
     }
   }
 }

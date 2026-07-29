@@ -10,12 +10,14 @@ import {
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
-import { BehaviorSubject, catchError, of, switchMap, tap } from 'rxjs';
+import { catchError, of, switchMap, tap } from 'rxjs';
 import { Timestamp } from '@angular/fire/firestore';
+import { FilterService } from '../../core/filter.service';
 import { SpeedtestResult } from '../../core/models/speedtest-result.model';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
 import { DashboardDataService } from './dashboard-data.service';
-import { DateRange, DateRangeFilterComponent } from './components/date-range-filter/date-range-filter.component';
+import { DateRangeFilterComponent } from '../../shared/date-range-filter/date-range-filter.component';
+import { LiveIndicatorComponent } from '../../shared/live-indicator/live-indicator.component';
 import { MetricsCardsComponent } from './components/metrics-cards/metrics-cards.component';
 import { ChartPoint, ChartSeries, SpeedChartComponent, makeColorScheme } from './components/speed-chart/speed-chart.component';
 import { Color } from '@swimlane/ngx-charts';
@@ -53,15 +55,18 @@ function toSeries(name: string, results: SpeedtestResult[], getValue: (r: Speedt
   imports: [
     NavbarComponent,
     DateRangeFilterComponent,
+    LiveIndicatorComponent,
     MetricsCardsComponent,
     SpeedChartComponent,
     TranslatePipe,
   ],
   template: `
-    <app-navbar />
-
+    <app-navbar>
     <main class="dashboard-main">
-      <app-date-range-filter (filterChange)="onFilterChange($event)" />
+      <div class="filter-row">
+        <app-date-range-filter />
+        <app-live-indicator [lastUpdated]="lastUpdated()" />
+      </div>
 
       <app-metrics-cards [results]="results()" [loading]="loading()" />
 
@@ -96,12 +101,19 @@ function toSeries(name: string, results: SpeedtestResult[], getValue: (r: Speedt
         [loading]="loading()"
       />
     </main>
+    </app-navbar>
   `,
   styles: [`
     .dashboard-main {
       max-width: 1200px;
       margin: 0 auto;
       padding: 0 1.5rem 3rem;
+    }
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
     }
     .no-data {
       text-align: center;
@@ -112,10 +124,11 @@ function toSeries(name: string, results: SpeedtestResult[], getValue: (r: Speedt
   `],
 })
 export class DashboardComponent implements OnInit {
-  private dataService  = inject(DashboardDataService);
-  private snackBar     = inject(MatSnackBar);
-  private translate    = inject(TranslateService);
-  private destroyRef   = inject(DestroyRef);
+  private dataService   = inject(DashboardDataService);
+  private filterService = inject(FilterService);
+  private snackBar      = inject(MatSnackBar);
+  private translate     = inject(TranslateService);
+  private destroyRef    = inject(DestroyRef);
 
   private langChange = toSignal(this.translate.onLangChange, { initialValue: null });
 
@@ -129,6 +142,9 @@ export class DashboardComponent implements OnInit {
 
   /** Latest result set for the active date range. */
   readonly results = signal<SpeedtestResult[]>([]);
+
+  /** Timestamp of the most recent data received from the Firestore listener. */
+  readonly lastUpdated = signal<Date | null>(null);
 
   /** Line chart series for download and upload speed (Mbps). */
   readonly speedSeries = computed<ChartSeries[]>(() => {
@@ -153,17 +169,12 @@ export class DashboardComponent implements OnInit {
     this.results().map(r => ({ name: formatTs(r.timestamp), value: r.packet_loss_pct }))
   );
 
-  private filterRange$ = new BehaviorSubject<DateRange>({
-    start: (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d; })(),
-    end: new Date(),
-  });
-
   /**
    * Subscribes to filter range changes and fetches matching Firestore data.
    * Shows a snackbar on query failure and falls back to an empty result set.
    */
   ngOnInit(): void {
-    this.filterRange$.pipe(
+    this.filterService.range$.pipe(
       tap(() => this.loading.set(true)),
       switchMap(range =>
         this.dataService.getResults(range.start, range.end).pipe(
@@ -179,15 +190,7 @@ export class DashboardComponent implements OnInit {
     ).subscribe(results => {
       this.results.set(results);
       this.loading.set(false);
+      this.lastUpdated.set(new Date());
     });
-  }
-
-  /**
-   * Handles date range changes emitted by the filter component.
-   *
-   * @param range - The new start/end date range to query.
-   */
-  onFilterChange(range: DateRange): void {
-    this.filterRange$.next(range);
   }
 }

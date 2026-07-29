@@ -33,6 +33,16 @@ export class ThemeService {
     this.applyTheme(!this.darkSubject.value);
   }
 
+  /**
+   * Explicitly selects light or dark theme and persists the preference
+   * to localStorage so it survives page refreshes.
+   *
+   * @param dark - True to activate the dark theme, false for light.
+   */
+  setTheme(dark: boolean): void {
+    this.applyTheme(dark);
+  }
+
   private applyTheme(dark: boolean): void {
     document.body.classList.toggle(DARK_CLASS, dark);
     localStorage.setItem(STORAGE_KEY, dark ? 'dark' : 'light');
