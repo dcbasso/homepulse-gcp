@@ -12,20 +12,14 @@ import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatCardModule } from '@angular/material/card';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
-import { BehaviorSubject, catchError, of, switchMap, tap } from 'rxjs';
+import { catchError, of, switchMap, tap } from 'rxjs';
+import { FilterService } from '../../core/filter.service';
 import { Heartbeat } from '../../core/models/heartbeat.model';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
-import { DateRange, DateRangeFilterComponent } from '../dashboard/components/date-range-filter/date-range-filter.component';
+import { DateRangeFilterComponent } from '../../shared/date-range-filter/date-range-filter.component';
+import { LiveIndicatorComponent } from '../../shared/live-indicator/live-indicator.component';
 import { HeartbeatTableComponent } from './components/heartbeat-table/heartbeat-table.component';
 import { HeartbeatHistoryDataService } from './heartbeat-history-data.service';
-
-/** Default range for the heartbeat history filter (last 24 hours). */
-function defaultRange(): DateRange {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - 1);
-  return { start, end };
-}
 
 /**
  * Heartbeat History screen.
@@ -40,21 +34,21 @@ function defaultRange(): DateRange {
   imports: [
     NavbarComponent,
     DateRangeFilterComponent,
+    LiveIndicatorComponent,
     HeartbeatTableComponent,
     MatProgressSpinnerModule,
     MatCardModule,
     TranslatePipe,
   ],
   template: `
-    <app-navbar />
-
+    <app-navbar>
     <main class="heartbeat-history-main">
       <h2 class="page-title">{{ 'HEARTBEAT_HISTORY.TITLE' | translate }}</h2>
 
-      <app-date-range-filter
-        defaultPeriod="24h"
-        (filterChange)="onFilterChange($event)"
-      />
+      <div class="filter-row">
+        <app-date-range-filter />
+        <app-live-indicator [lastUpdated]="lastUpdated()" />
+      </div>
 
       @if (!loading()) {
         <div class="summary-row">
@@ -75,6 +69,7 @@ function defaultRange(): DateRange {
         <app-heartbeat-table [results]="results()" />
       }
     </main>
+    </app-navbar>
   `,
   styles: [`
     .heartbeat-history-main {
@@ -88,6 +83,13 @@ function defaultRange(): DateRange {
       font-size: 1.1rem;
       font-weight: 600;
       color: var(--mat-sys-on-surface);
+    }
+
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
     }
 
     .loading-row {
@@ -129,16 +131,20 @@ function defaultRange(): DateRange {
   `],
 })
 export class HeartbeatHistoryComponent implements OnInit {
-  private dataService = inject(HeartbeatHistoryDataService);
-  private snackBar    = inject(MatSnackBar);
-  private translate   = inject(TranslateService);
-  private destroyRef  = inject(DestroyRef);
+  private dataService   = inject(HeartbeatHistoryDataService);
+  private filterService = inject(FilterService);
+  private snackBar      = inject(MatSnackBar);
+  private translate     = inject(TranslateService);
+  private destroyRef    = inject(DestroyRef);
 
   /** True while a Firestore query is in flight. */
   readonly loading = signal(true);
 
   /** Current result list for the active date range. */
   readonly results = signal<Heartbeat[]>([]);
+
+  /** Timestamp of the most recent data received from the Firestore listener. */
+  readonly lastUpdated = signal<Date | null>(null);
 
   /** Number of distinct external IPs in the current result set. */
   readonly uniqueIpCount = computed(() =>
@@ -149,14 +155,12 @@ export class HeartbeatHistoryComponent implements OnInit {
     ).size,
   );
 
-  private filterRange$ = new BehaviorSubject<DateRange>(defaultRange());
-
   /**
    * Subscribes to filter range changes and fetches matching results from Firestore.
    * On query failure, shows a snackbar and falls back to an empty list.
    */
   ngOnInit(): void {
-    this.filterRange$.pipe(
+    this.filterService.range$.pipe(
       tap(() => this.loading.set(true)),
       switchMap(range =>
         this.dataService.getResults(range.start, range.end).pipe(
@@ -171,15 +175,7 @@ export class HeartbeatHistoryComponent implements OnInit {
     ).subscribe(results => {
       this.results.set(results);
       this.loading.set(false);
+      this.lastUpdated.set(new Date());
     });
-  }
-
-  /**
-   * Handles date range changes emitted by the filter component.
-   *
-   * @param range - The new start/end date range to query.
-   */
-  onFilterChange(range: DateRange): void {
-    this.filterRange$.next(range);
   }
 }

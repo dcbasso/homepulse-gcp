@@ -2,7 +2,9 @@
   "COMMON": {
     "ERROR": "An unexpected error occurred",
     "SEARCH": "Search",
-    "REMOVE": "Remove"
+    "REMOVE": "Remove",
+    "LIVE": "Live",
+    "LAST_UPDATED": "Updated at {{time}}"
   },
   "LOGIN": {
     "TITLE": "HomePulse",
@@ -19,7 +21,21 @@
     "SETTINGS": "Settings",
     "ABOUT": "About",
     "SIGN_OUT": "Sign out",
-    "LANGUAGE": "Language"
+    "MENU": "Menu",
+    "PREFERENCES": "Preferences"
+  },
+  "PREFERENCES": {
+    "TITLE": "Preferences",
+    "THEME_TITLE": "Theme",
+    "THEME_LIGHT": "Light",
+    "THEME_DARK": "Dark",
+    "LANGUAGE_TITLE": "Language",
+    "LANG_PT_BR": "Português",
+    "LANG_EN": "English",
+    "LANG_ES": "Español",
+    "INSTALL_TITLE": "Install app",
+    "INSTALL_DESCRIPTION": "Add HomePulse to your device's home screen for quick access, like a native app.",
+    "INSTALL_BUTTON": "Install"
   },
   "DASHBOARD": {
     "PERIOD_LABEL": "Period",

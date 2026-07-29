@@ -12,9 +12,11 @@ import { MatCardModule } from '@angular/material/card';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
-import { BehaviorSubject, catchError, of, switchMap, tap } from 'rxjs';
+import { catchError, of, switchMap, tap } from 'rxjs';
+import { FilterService } from '../../core/filter.service';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
-import { DateRange, DateRangeFilterComponent } from '../dashboard/components/date-range-filter/date-range-filter.component';
+import { DateRangeFilterComponent } from '../../shared/date-range-filter/date-range-filter.component';
+import { LiveIndicatorComponent } from '../../shared/live-indicator/live-indicator.component';
 import { IncidentListComponent } from './components/incident-list/incident-list.component';
 import { IncidentPatternComponent } from './components/incident-pattern/incident-pattern.component';
 import { IncidentsDataService } from './incidents-data.service';
@@ -27,14 +29,6 @@ function formatTotalOffline(totalMinutes: number): string {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   return h > 0 ? `${h}h ${String(m).padStart(2, '0')}min` : `${m}min`;
-}
-
-/** Default range to seed the filter subject (30 days back). */
-function defaultRange(): DateRange {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - 30);
-  return { start, end };
 }
 
 /**
@@ -50,6 +44,7 @@ function defaultRange(): DateRange {
   imports: [
     NavbarComponent,
     DateRangeFilterComponent,
+    LiveIndicatorComponent,
     IncidentListComponent,
     IncidentPatternComponent,
     MatCardModule,
@@ -57,13 +52,12 @@ function defaultRange(): DateRange {
     TranslatePipe,
   ],
   template: `
-    <app-navbar />
-
+    <app-navbar>
     <main class="incidents-main">
-      <app-date-range-filter
-        defaultPeriod="30d"
-        (filterChange)="onFilterChange($event)"
-      />
+      <div class="filter-row">
+        <app-date-range-filter />
+        <app-live-indicator [lastUpdated]="lastUpdated()" />
+      </div>
 
       <div class="summary-cards">
         <mat-card class="summary-card">
@@ -98,12 +92,20 @@ function defaultRange(): DateRange {
         <app-incident-list [incidents]="incidents()" />
       }
     </main>
+    </app-navbar>
   `,
   styles: [`
     .incidents-main {
       max-width: 1100px;
       margin: 0 auto;
       padding: 0 1.5rem 3rem;
+    }
+
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
     }
 
     .summary-cards {
@@ -149,6 +151,7 @@ function defaultRange(): DateRange {
 export class IncidentsComponent implements OnInit {
   private dataService    = inject(IncidentsDataService);
   private patternService = inject(IncidentPatternService);
+  private filterService  = inject(FilterService);
   private snackBar       = inject(MatSnackBar);
   private translate      = inject(TranslateService);
   private destroyRef     = inject(DestroyRef);
@@ -158,6 +161,9 @@ export class IncidentsComponent implements OnInit {
 
   /** Current incident list for the active date range. */
   readonly incidents = signal<Incident[]>([]);
+
+  /** Timestamp of the most recent data received from the Firestore listener. */
+  readonly lastUpdated = signal<Date | null>(null);
 
   /** Pattern report derived from the current incident list. */
   readonly pattern = computed(() => this.patternService.compute(this.incidents()));
@@ -173,14 +179,12 @@ export class IncidentsComponent implements OnInit {
     return formatTotalOffline(total);
   });
 
-  private filterRange$ = new BehaviorSubject<DateRange>(defaultRange());
-
   /**
    * Subscribes to filter range changes and fetches matching incidents from Firestore.
    * On query failure, shows a snackbar and falls back to an empty list.
    */
   ngOnInit(): void {
-    this.filterRange$.pipe(
+    this.filterService.range$.pipe(
       tap(() => this.loading.set(true)),
       switchMap(range =>
         this.dataService.getIncidents(range.start, range.end).pipe(
@@ -195,15 +199,7 @@ export class IncidentsComponent implements OnInit {
     ).subscribe(incidents => {
       this.incidents.set(incidents);
       this.loading.set(false);
+      this.lastUpdated.set(new Date());
     });
-  }
-
-  /**
-   * Handles date range changes emitted by the filter component.
-   *
-   * @param range - The new start/end date range to query.
-   */
-  onFilterChange(range: DateRange): void {
-    this.filterRange$.next(range);
   }
 }

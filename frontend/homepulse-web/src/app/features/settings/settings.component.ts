@@ -143,8 +143,7 @@ function maskBotToken(token: string): string {
     TranslatePipe,
   ],
   template: `
-    <app-navbar />
-
+    <app-navbar>
     <main class="settings-main">
       <h1 class="settings-title">{{ 'SETTINGS.TITLE' | translate }}</h1>
 
@@ -421,6 +420,7 @@ function maskBotToken(token: string): string {
 
       </form>
     </main>
+    </app-navbar>
   `,
   styles: [`
     .settings-main {
