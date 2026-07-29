@@ -11,6 +11,7 @@ export interface SpeedtestResult {
   packet_loss_pct: number;
   server?: string;
   isp?: string;
-  external_ip?: string;
+  external_ip_v4?: string;
+  external_ip_v6?: string;
   result_url?: string;
 }
