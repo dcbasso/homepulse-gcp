@@ -71,19 +71,48 @@ async fn run_heartbeat_loop(cfg: Config, token_cache: TokenCache) {
 /// Returns an error if authentication or the Firestore write fails. A failed
 /// IP lookup does not cause an error; `None` is passed through instead.
 async fn run_heartbeat_once(cfg: &Config, token_cache: &TokenCache) -> Result<()> {
-    let external_ip = match whoami::fetch_external_ip(&cfg.heartbeat.whoami_url).await {
+    let (external_ip_v4, external_ip_v6) = resolve_external_ips(&cfg.heartbeat.whoami_url).await;
+
+    let token = firestore::get_cached_access_token(&cfg.gcp, token_cache).await?;
+    firestore::append_heartbeat(
+        &cfg.gcp,
+        &cfg.heartbeat.collection,
+        &token,
+        external_ip_v4.as_deref(),
+        external_ip_v6.as_deref(),
+    )
+    .await?;
+
+    info!(
+        "Heartbeat written (external_ip_v4={:?}, external_ip_v6={:?})",
+        external_ip_v4, external_ip_v6
+    );
+    Ok(())
+}
+
+/// Resolves the caller's public IPv4 and IPv6 addresses by calling the same
+/// `whoami` endpoint twice, forcing a different socket family each time
+/// (the endpoint's domain is dual-stack), logging a warning per family that
+/// fails instead of silently falling back to a placeholder.
+///
+/// # Arguments
+/// * `whoami_url` - Dual-stack `whoami` endpoint URL.
+async fn resolve_external_ips(whoami_url: &str) -> (Option<String>, Option<String>) {
+    let v4 = match whoami::fetch_external_ipv4(whoami_url).await {
         Ok(ip) => Some(ip),
         Err(e) => {
-            error!("Failed to resolve external IP: {:?}", e);
+            error!("Failed to resolve external IPv4: {:?}", e);
             None
         }
     };
-
-    let token = firestore::get_cached_access_token(&cfg.gcp, token_cache).await?;
-    firestore::append_heartbeat(&cfg.gcp, &cfg.heartbeat.collection, &token, external_ip.as_deref()).await?;
-
-    info!("Heartbeat written (external_ip={:?})", external_ip);
-    Ok(())
+    let v6 = match whoami::fetch_external_ipv6(whoami_url).await {
+        Ok(ip) => Some(ip),
+        Err(e) => {
+            error!("Failed to resolve external IPv6: {:?}", e);
+            None
+        }
+    };
+    (v4, v6)
 }
 
 /// Runs the speedtest loop forever, ticking every `cfg.speedtest.interval_minutes` minutes.
@@ -115,11 +144,15 @@ async fn run_speedtest_loop(cfg: Config, token_cache: TokenCache) {
 /// the Firestore write fails.
 async fn run_speedtest_once(cfg: &Config, token_cache: &TokenCache) -> Result<()> {
     info!("Running speedtest...");
-    let result = speedtest::run(&cfg.speedtest)?;
+    let mut result = speedtest::run(&cfg.speedtest)?;
+
+    let (external_ip_v4, external_ip_v6) = resolve_external_ips(&cfg.speedtest.whoami_url).await;
+    result.external_ip_v4 = external_ip_v4;
+    result.external_ip_v6 = external_ip_v6;
 
     info!(
-        "Result: download={:.2} Mbps upload={:.2} Mbps ping={:.1} ms",
-        result.download_mbps, result.upload_mbps, result.ping_ms
+        "Result: download={:.2} Mbps upload={:.2} Mbps ping={:.1} ms external_ip_v4={:?} external_ip_v6={:?}",
+        result.download_mbps, result.upload_mbps, result.ping_ms, result.external_ip_v4, result.external_ip_v6
     );
 
     let token = firestore::get_cached_access_token(&cfg.gcp, token_cache).await?;

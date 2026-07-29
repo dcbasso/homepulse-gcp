@@ -4,5 +4,6 @@ import { Timestamp } from '@angular/fire/firestore';
 export interface Heartbeat {
   id?: string;
   timestamp: Timestamp;
-  external_ip?: string;
+  external_ip_v4?: string;
+  external_ip_v6?: string;
 }

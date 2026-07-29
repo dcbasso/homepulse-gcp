@@ -10,6 +10,9 @@ use tokio::sync::Mutex;
 
 const DATASTORE_SCOPE: &str = "https://www.googleapis.com/auth/datastore";
 
+/// Placeholder stored in Firestore when an IP lookup (v4 or v6) failed.
+const UNKNOWN_IP: &str = "unknown";
+
 /// Lifetime of an OAuth2 access token issued by the Google token endpoint, in seconds.
 const TOKEN_LIFETIME_SECS: u64 = 3600;
 
@@ -163,7 +166,8 @@ pub async fn append_document(
             "packet_loss_pct": { "doubleValue": result.packet_loss_pct },
             "server":          { "stringValue": result.server },
             "isp":             { "stringValue": result.isp },
-            "external_ip":     { "stringValue": result.external_ip },
+            "external_ip_v4":  { "stringValue": result.external_ip_v4.as_deref().unwrap_or(UNKNOWN_IP) },
+            "external_ip_v6":  { "stringValue": result.external_ip_v6.as_deref().unwrap_or(UNKNOWN_IP) },
             "result_url":      { "stringValue": result.result_url }
         }
     });
@@ -188,15 +192,16 @@ pub async fn append_document(
 
 /// Appends a liveness heartbeat as a new document to the Firestore collection.
 ///
-/// Mirrors [`append_document`] but with a minimal body (`timestamp` and
-/// `external_ip` only), since the heartbeat only needs to prove connectivity,
-/// not carry a full speedtest measurement.
+/// Mirrors [`append_document`] but with a minimal body (`timestamp`,
+/// `external_ip_v4` and `external_ip_v6` only), since the heartbeat only
+/// needs to prove connectivity, not carry a full speedtest measurement.
 ///
 /// # Arguments
 /// * `config` - Firestore connection settings (project ID, Service Account key path).
 /// * `collection` - Target Firestore collection name.
 /// * `token` - OAuth2 bearer token obtained via [`get_access_token`] or [`get_cached_access_token`].
-/// * `external_ip` - Public IP resolved via the `whoami` endpoint, or `None` if that lookup failed.
+/// * `external_ip_v4` - Public IPv4 resolved via the `whoami` endpoint, or `None` if that lookup failed.
+/// * `external_ip_v6` - Public IPv6 resolved via the `whoami` endpoint, or `None` if that lookup failed.
 ///   A failed IP lookup must not prevent the heartbeat write, so `"unknown"` is stored instead.
 ///
 /// # Errors
@@ -205,10 +210,9 @@ pub async fn append_heartbeat(
     config: &FirestoreConfig,
     collection: &str,
     token: &str,
-    external_ip: Option<&str>,
+    external_ip_v4: Option<&str>,
+    external_ip_v6: Option<&str>,
 ) -> Result<()> {
-    const UNKNOWN_IP: &str = "unknown";
-
     let url = format!(
         "https://firestore.googleapis.com/v1/projects/{}/databases/speedtest-monitordb-one/documents/{}",
         config.project_id, collection
@@ -216,8 +220,9 @@ pub async fn append_heartbeat(
 
     let body = serde_json::json!({
         "fields": {
-            "timestamp":   { "timestampValue": Utc::now().to_rfc3339() },
-            "external_ip": { "stringValue": external_ip.unwrap_or(UNKNOWN_IP) }
+            "timestamp":      { "timestampValue": Utc::now().to_rfc3339() },
+            "external_ip_v4": { "stringValue": external_ip_v4.unwrap_or(UNKNOWN_IP) },
+            "external_ip_v6": { "stringValue": external_ip_v6.unwrap_or(UNKNOWN_IP) }
         }
     });
 

@@ -22,6 +22,9 @@ pub struct Config {
 pub struct HeartbeatConfig {
     pub interval_minutes: u64,
     pub collection: String,
+    /// `whoami` endpoint. Its domain is dual-stack (both `A` and `AAAA`
+    /// DNS records), so the same URL is queried twice by the client: once
+    /// forcing an IPv4 socket, once forcing an IPv6 socket.
     pub whoami_url: String,
 }
 
@@ -32,6 +35,8 @@ pub struct SpeedtestConfig {
     pub timeout_seconds: u64,
     pub interval_minutes: u64,
     pub collection: String,
+    /// See [`HeartbeatConfig::whoami_url`].
+    pub whoami_url: String,
 }
 
 /// Firestore connection settings (project ID and Service Account key path).

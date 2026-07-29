@@ -77,7 +77,8 @@
     "COL_UPLOAD": "Upload",
     "COL_PING": "Ping",
     "COL_JITTER": "Jitter",
-    "COL_IP": "IP",
+    "COL_IPV4": "IPv4",
+    "COL_IPV6": "IPv6",
     "COL_INFO": "Info",
     "TOTAL_RECORDS": "Total records",
     "NO_DATA": "No records found"
@@ -85,7 +86,8 @@
   "HEARTBEAT_HISTORY": {
     "TITLE": "Heartbeat",
     "COL_TIME": "Date/time",
-    "COL_IP": "IP address",
+    "COL_IPV4": "IPv4 address",
+    "COL_IPV6": "IPv6 address",
     "UNIQUE_IPS": "Unique IPs",
     "NO_DATA": "No records found"
   },

@@ -142,7 +142,11 @@ export class HeartbeatHistoryComponent implements OnInit {
 
   /** Number of distinct external IPs in the current result set. */
   readonly uniqueIpCount = computed(() =>
-    new Set(this.results().map(r => r.external_ip).filter(Boolean)).size,
+    new Set(
+      this.results()
+        .map(r => `${r.external_ip_v4 ?? ''}|${r.external_ip_v6 ?? ''}`)
+        .filter(pair => pair !== '|'),
+    ).size,
   );
 
   private filterRange$ = new BehaviorSubject<DateRange>(defaultRange());

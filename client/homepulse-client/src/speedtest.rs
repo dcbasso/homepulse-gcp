@@ -19,7 +19,6 @@ struct RawResult {
     #[serde(rename = "packetLoss")]
     packet_loss: Option<f64>,
     isp: Option<String>,
-    interface: Option<RawInterface>,
     server: RawServer,
     result: Option<RawResultLink>,
 }
@@ -34,12 +33,6 @@ struct RawPing {
 struct RawTransfer {
     /// bytes per second
     bandwidth: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawInterface {
-    #[serde(rename = "externalIp")]
-    external_ip: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,7 +59,10 @@ pub struct SpeedtestResult {
     pub packet_loss_pct: f64,
     pub server: String,
     pub isp: String,
-    pub external_ip: String,
+    /// Public IPv4 address, resolved separately via the `whoami` endpoint.
+    pub external_ip_v4: Option<String>,
+    /// Public IPv6 address, resolved separately via the `whoami` endpoint.
+    pub external_ip_v6: Option<String>,
     pub result_url: String,
 }
 
@@ -120,11 +116,6 @@ pub fn run(config: &SpeedtestConfig) -> Result<SpeedtestResult> {
 
     let bytes_to_mbps = |bandwidth: u64| (bandwidth as f64 * 8.0) / 1_000_000.0;
 
-    let external_ip = raw
-        .interface
-        .and_then(|i| i.external_ip)
-        .unwrap_or_else(|| "unknown".to_string());
-
     Ok(SpeedtestResult {
         timestamp: Utc::now(),
         download_mbps: bytes_to_mbps(raw.download.bandwidth),
@@ -134,7 +125,10 @@ pub fn run(config: &SpeedtestConfig) -> Result<SpeedtestResult> {
         packet_loss_pct: raw.packet_loss.unwrap_or(0.0),
         server: format!("{} - {}, {}", raw.server.name, raw.server.location, raw.server.country),
         isp: raw.isp.unwrap_or_else(|| "unknown".to_string()),
-        external_ip,
+        // Resolved by the caller via the `whoami` endpoints, not the Ookla CLI:
+        // the CLI's `interface.externalIp` field is frequently absent in practice.
+        external_ip_v4: None,
+        external_ip_v6: None,
         result_url: raw.result.and_then(|r| r.url).unwrap_or_default(),
     })
 }

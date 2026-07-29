@@ -77,7 +77,8 @@
     "COL_UPLOAD": "Subida",
     "COL_PING": "Ping",
     "COL_JITTER": "Jitter",
-    "COL_IP": "IP",
+    "COL_IPV4": "IPv4",
+    "COL_IPV6": "IPv6",
     "COL_INFO": "Info",
     "TOTAL_RECORDS": "Total de registros",
     "NO_DATA": "No se encontraron registros"
@@ -85,7 +86,8 @@
   "HEARTBEAT_HISTORY": {
     "TITLE": "Heartbeat",
     "COL_TIME": "Fecha/hora",
-    "COL_IP": "Dirección IP",
+    "COL_IPV4": "Dirección IPv4",
+    "COL_IPV6": "Dirección IPv6",
     "UNIQUE_IPS": "IPs únicas",
     "NO_DATA": "No se encontraron registros"
   },

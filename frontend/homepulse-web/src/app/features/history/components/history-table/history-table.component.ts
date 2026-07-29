@@ -69,9 +69,14 @@ function buildInfoTooltip(row: SpeedtestResult): string {
           <td mat-cell *matCellDef="let row">{{ formatTimestamp(row.timestamp) }}</td>
         </ng-container>
 
-        <ng-container matColumnDef="external_ip">
-          <th mat-header-cell *matHeaderCellDef>{{ 'HISTORY.COL_IP' | translate }}</th>
-          <td mat-cell *matCellDef="let row" class="ip-cell">{{ row.external_ip || '—' }}</td>
+        <ng-container matColumnDef="external_ip_v4">
+          <th mat-header-cell *matHeaderCellDef>{{ 'HISTORY.COL_IPV4' | translate }}</th>
+          <td mat-cell *matCellDef="let row" class="ip-cell">{{ row.external_ip_v4 || '—' }}</td>
+        </ng-container>
+
+        <ng-container matColumnDef="external_ip_v6">
+          <th mat-header-cell *matHeaderCellDef>{{ 'HISTORY.COL_IPV6' | translate }}</th>
+          <td mat-cell *matCellDef="let row" class="ip-cell">{{ row.external_ip_v6 || '—' }}</td>
         </ng-container>
 
         <ng-container matColumnDef="download_mbps">
@@ -156,7 +161,7 @@ export class HistoryTableComponent implements AfterViewInit {
   @ViewChild(MatPaginator) paginator!: MatPaginator;
 
   readonly dataSource = new MatTableDataSource<SpeedtestResult>([]);
-  readonly displayedColumns = ['timestamp', 'external_ip', 'download_mbps', 'upload_mbps', 'jitter_ms', 'ping_ms', 'info'];
+  readonly displayedColumns = ['timestamp', 'external_ip_v4', 'external_ip_v6', 'download_mbps', 'upload_mbps', 'jitter_ms', 'ping_ms', 'info'];
   readonly PAGE_SIZE = PAGE_SIZE;
 
   protected readonly formatTimestamp = formatTimestamp;
@@ -165,7 +170,7 @@ export class HistoryTableComponent implements AfterViewInit {
   constructor() {
     this.dataSource.filterPredicate = (row: SpeedtestResult, filter: string) => {
       const term = filter.trim().toLowerCase();
-      return [row.external_ip, row.isp, row.server]
+      return [row.external_ip_v4, row.external_ip_v6, row.isp, row.server]
         .some(field => (field ?? '').toLowerCase().includes(term));
     };
 
