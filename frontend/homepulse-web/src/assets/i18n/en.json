@@ -113,6 +113,12 @@
     "FIXED_INTERVAL_INFO": "Automatic check every 1 minute",
     "FIELD_THRESHOLD": "Minutes without data to trigger alert",
     "FIELD_THRESHOLD_HINT": "Alert fires after 2 consecutive checks (1 minute apart) above this value — worst-case total detection time is this value plus up to 2 minutes",
+    "SECTION_DATETIME": "Date and time",
+    "FIELD_TIMEZONE": "Timezone",
+    "FIELD_DATE_FORMAT": "Date format",
+    "FIELD_DATE_FORMAT_CUSTOM": "Custom",
+    "FIELD_DATE_FORMAT_CUSTOM_HINT": "strftime pattern — common directives: %d day, %m month, %Y year, %H hour (24h), %I hour (12h), %M minute, %S second, %p AM/PM, %Z timezone",
+    "FIELD_DATE_FORMAT_PREVIEW": "Preview",
     "SECTION_EMAIL": "Email notifications",
     "SECTION_RECIPIENTS": "Recipients",
     "ADD_RECIPIENT": "Add recipient",
@@ -154,7 +160,11 @@
     "CANCEL": "Cancel",
     "SAVE": "Save",
     "SAVE_SUCCESS": "Settings saved successfully",
-    "SAVE_ERROR": "Failed to save settings"
+    "SAVE_ERROR": "Failed to save settings",
+    "TEST_SEND": "Test send",
+    "TEST_SEND_NO_RECIPIENTS": "Add a recipient to test",
+    "TEST_SEND_SUCCESS": "Test sent to {{count}} recipient(s)",
+    "TEST_SEND_ERROR": "Test send failed"
   },
   "ABOUT": {
     "TITLE": "About",

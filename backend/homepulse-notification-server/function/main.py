@@ -7,19 +7,25 @@ Incident records are persisted in Firestore.
 """
 
 import base64
+import email.mime.image
+import email.mime.multipart
 import email.mime.text
 import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import functions_framework
 import requests
 from google.cloud import firestore
+from google.oauth2 import id_token as google_id_token
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+
+from email_template import build_html_email
 
 # The Cloud Run Python runtime pre-configures the root logger with its own
 # handler, making `logging.basicConfig()` a no-op (it only takes effect when
@@ -58,7 +64,39 @@ DEFAULT_BODY_UP = (
     "Down at: ${DATETIME_DOWN}\nRecovered at: ${DATETIME_UP}\nTotal downtime: ${TOTAL_TIME} min"
 )
 
+# Fallback timezone/format applied when `monitor_config/current` has no
+# `timezone`/`date_format` field yet, or holds a value that fails to parse.
+DEFAULT_TIMEZONE = "UTC"
+DEFAULT_DATE_FORMAT = "%d/%m/%Y %H:%M:%S %Z"
+
 TELEGRAM_API_BASE = "https://api.telegram.org"
+
+# Telegram rejects sendPhoto calls whose `caption` exceeds this length.
+TELEGRAM_CAPTION_MAX_LENGTH = 1024
+
+# Logo bundled with the Cloud Function source (see terraform/function.tf,
+# which zips this whole directory), used both as the Telegram photo and as
+# the embedded header image in HTML emails.
+LOGO_PATH = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
+
+# Marker prepended to the subject/caption of a send_test_alert message so
+# recipients can immediately tell it's a drill, not a real outage.
+TEST_ALERT_PREFIX = "[TESTE] "
+
+# Synthetic outage duration used to fill ${TOTAL_TIME} in a send_test_alert
+# preview — there is no real incident behind a test send.
+TEST_ALERT_DOWNTIME_MINUTES = 8
+
+# CORS headers for send_test_alert, the only Cloud Function in this project
+# called directly from the browser (the others are invoked by Cloud Scheduler
+# or the Rust client, which aren't subject to CORS). Open to any origin since
+# the endpoint is protected by its own Firebase ID token + email check below,
+# not by origin — a page on another origin still can't forge a valid token.
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+}
 
 _gmail_service = None
 
@@ -81,6 +119,10 @@ class MonitorConfig:
             for Telegram alert recipients.
         notify_telegram_on_down: Whether to send Telegram alerts when an outage is detected.
         notify_telegram_on_recovery: Whether to send Telegram alerts when the internet recovers.
+        timezone: IANA timezone name (e.g. "America/Sao_Paulo") used to render
+            ${DATETIME_DOWN}/${DATETIME_UP} placeholders.
+        date_format: strftime pattern used to render ${DATETIME_DOWN}/${DATETIME_UP}
+            placeholders.
     """
 
     max_minutes: int
@@ -94,6 +136,8 @@ class MonitorConfig:
     telegram_recipients: list[dict]
     notify_telegram_on_down: bool
     notify_telegram_on_recovery: bool
+    timezone: str
+    date_format: str
 
 
 def _get_firestore_client() -> firestore.Client:
@@ -161,6 +205,8 @@ def _load_monitor_config(db: firestore.Client) -> MonitorConfig:
             telegram_recipients=telegram_recipients,
             notify_telegram_on_down=bool(data.get("notify_telegram_on_down", True)),
             notify_telegram_on_recovery=bool(data.get("notify_telegram_on_recovery", True)),
+            timezone=data.get("timezone") or DEFAULT_TIMEZONE,
+            date_format=data.get("date_format") or DEFAULT_DATE_FORMAT,
         )
 
     logger.warning("monitor_config/current not found — using env var defaults")
@@ -177,6 +223,8 @@ def _load_monitor_config(db: firestore.Client) -> MonitorConfig:
         telegram_recipients=[],
         notify_telegram_on_down=True,
         notify_telegram_on_recovery=True,
+        timezone=DEFAULT_TIMEZONE,
+        date_format=DEFAULT_DATE_FORMAT,
     )
 
 
@@ -194,6 +242,32 @@ def _resolve_template(template: str, replacements: dict[str, str]) -> str:
     for key, value in replacements.items():
         result = result.replace(f"${{{key}}}", value)
     return result
+
+
+def _format_datetime(dt: datetime, tz_name: str, date_format: str) -> str:
+    """Converts a UTC datetime to the given timezone and renders it with a strftime pattern.
+
+    Falls back to DEFAULT_TIMEZONE/DEFAULT_DATE_FORMAT if `tz_name` is not a
+    recognized IANA timezone or `date_format` is not a valid strftime pattern,
+    since both come from user-editable Firestore config and must not crash
+    the alert pipeline.
+
+    Args:
+        dt: Timezone-aware UTC datetime to render.
+        tz_name: IANA timezone name (e.g. "America/Sao_Paulo").
+        date_format: strftime pattern.
+
+    Returns:
+        The formatted datetime string.
+    """
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo(DEFAULT_TIMEZONE)
+    try:
+        return dt.astimezone(tz).strftime(date_format)
+    except (ValueError, TypeError):
+        return dt.astimezone(tz).strftime(DEFAULT_DATE_FORMAT)
 
 
 def _get_latest_heartbeat_timestamp(db: firestore.Client) -> datetime | None:
@@ -361,7 +435,13 @@ def _build_gmail_service():
 
 
 def _send_email(to: str, subject: str, body: str) -> None:
-    """Sends an email via the Gmail API.
+    """Sends a branded HTML email via the Gmail API, with a plain-text fallback.
+
+    The message is a multipart/related > multipart/alternative structure: a
+    plain-text part identical to `body` (for clients that can't render HTML),
+    an HTML part wrapping `body` in the HomePulse branded template, and the
+    HomePulse logo attached inline and referenced via its Content-ID so it
+    renders without depending on external image hosting.
 
     Args:
         to: Recipient email address.
@@ -369,9 +449,23 @@ def _send_email(to: str, subject: str, body: str) -> None:
         body: Plain-text email body.
     """
     global _gmail_service
-    message = email.mime.text.MIMEText(body)
+    logo_cid = "homepulse-logo"
+
+    alternative = email.mime.multipart.MIMEMultipart("alternative")
+    alternative.attach(email.mime.text.MIMEText(body, "plain"))
+    alternative.attach(email.mime.text.MIMEText(build_html_email(body, logo_cid), "html"))
+
+    message = email.mime.multipart.MIMEMultipart("related")
     message["to"] = to
     message["subject"] = subject
+    message.attach(alternative)
+
+    with open(LOGO_PATH, "rb") as f:
+        logo = email.mime.image.MIMEImage(f.read())
+    logo.add_header("Content-ID", f"<{logo_cid}>")
+    logo.add_header("Content-Disposition", "inline", filename="logo.png")
+    message.attach(logo)
+
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     try:
         service = _build_gmail_service()
@@ -390,6 +484,8 @@ def _send_down_alert(
     diff_minutes: float,
     subject: str,
     body_template: str,
+    tz_name: str,
+    date_format: str,
 ) -> None:
     """Sends an internet-down alert email to a single recipient.
 
@@ -401,10 +497,12 @@ def _send_down_alert(
         diff_minutes: Minutes elapsed since the last record.
         subject: Email subject line.
         body_template: Body template string with optional placeholders.
+        tz_name: IANA timezone name used to render the placeholders.
+        date_format: strftime pattern used to render the placeholders.
     """
     body = _resolve_template(body_template, {
         "NAME": recipient["name"],
-        "DATETIME_DOWN": last_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "DATETIME_DOWN": _format_datetime(last_timestamp, tz_name, date_format),
     })
     _send_email(to=recipient["email"], subject=subject, body=body)
 
@@ -416,6 +514,8 @@ def _send_recovery_alert(
     duration_minutes: int | None,
     subject: str,
     body_template: str,
+    tz_name: str,
+    date_format: str,
 ) -> None:
     """Sends an internet-recovery alert email to a single recipient.
 
@@ -429,32 +529,47 @@ def _send_recovery_alert(
         duration_minutes: Total outage duration in minutes, or None if unavailable.
         subject: Email subject line.
         body_template: Body template string with optional placeholders.
+        tz_name: IANA timezone name used to render the placeholders.
+        date_format: strftime pattern used to render the placeholders.
     """
     datetime_down = (
-        started_at.strftime("%Y-%m-%d %H:%M:%S UTC") if started_at else "unknown"
+        _format_datetime(started_at, tz_name, date_format) if started_at else "unknown"
     )
     total_time = str(duration_minutes) if duration_minutes is not None else "unknown"
     body = _resolve_template(body_template, {
         "NAME": recipient["name"],
         "DATETIME_DOWN": datetime_down,
-        "DATETIME_UP": recovery_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "DATETIME_UP": _format_datetime(recovery_timestamp, tz_name, date_format),
         "TOTAL_TIME": total_time,
     })
     _send_email(to=recipient["email"], subject=subject, body=body)
 
 
-def _send_telegram_message(bot_token: str, chat_id: str, text: str) -> None:
-    """Sends a text message via the Telegram Bot API.
+def _send_telegram_message(bot_token: str, chat_id: str, caption: str) -> None:
+    """Sends the HomePulse logo with a text caption via the Telegram Bot API.
+
+    Uses sendPhoto instead of sendMessage so every alert carries the HomePulse
+    logo. Telegram caps photo captions at TELEGRAM_CAPTION_MAX_LENGTH characters,
+    so an overly long caption (e.g. from a user-customized template) is truncated
+    rather than rejected by the API.
 
     Args:
         bot_token: Telegram bot token obtained from @BotFather.
         chat_id: Telegram chat ID (or @channelusername) to send the message to.
-        text: Plain-text message body (Telegram's sendMessage has no subject field).
+        caption: Text shown under the logo (Telegram's sendPhoto has no subject field).
     """
-    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendMessage"
-    response = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
+    if len(caption) > TELEGRAM_CAPTION_MAX_LENGTH:
+        caption = caption[: TELEGRAM_CAPTION_MAX_LENGTH - 1] + "…"
+    url = f"{TELEGRAM_API_BASE}/bot{bot_token}/sendPhoto"
+    with open(LOGO_PATH, "rb") as f:
+        response = requests.post(
+            url,
+            data={"chat_id": chat_id, "caption": caption},
+            files={"photo": f},
+            timeout=10,
+        )
     response.raise_for_status()
-    logger.info("Telegram message sent to chat_id %s", chat_id)
+    logger.info("Telegram photo sent to chat_id %s", chat_id)
 
 
 def _send_telegram_down_alert(
@@ -462,21 +577,26 @@ def _send_telegram_down_alert(
     last_timestamp: datetime,
     subject: str,
     body_template: str,
+    tz_name: str,
+    date_format: str,
 ) -> None:
     """Sends an internet-down alert via Telegram to a single recipient.
 
     Resolves ${NAME} and ${DATETIME_DOWN} placeholders in the body template, then
-    combines subject and body into a single message since Telegram has no subject field.
+    combines subject and body into a single caption since Telegram's sendPhoto
+    has no subject field.
 
     Args:
         recipient: Dict with 'name', 'bot_token', and 'chat_id' keys.
         last_timestamp: UTC timestamp of the last received heartbeat record.
         subject: Subject line (same value used for the email subject).
         body_template: Body template string with optional placeholders.
+        tz_name: IANA timezone name used to render the placeholders.
+        date_format: strftime pattern used to render the placeholders.
     """
     body = _resolve_template(body_template, {
         "NAME": recipient["name"],
-        "DATETIME_DOWN": last_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "DATETIME_DOWN": _format_datetime(last_timestamp, tz_name, date_format),
     })
     _send_telegram_message(recipient["bot_token"], recipient["chat_id"], f"{subject}\n\n{body}")
 
@@ -488,12 +608,14 @@ def _send_telegram_recovery_alert(
     duration_minutes: int | None,
     subject: str,
     body_template: str,
+    tz_name: str,
+    date_format: str,
 ) -> None:
     """Sends an internet-recovery alert via Telegram to a single recipient.
 
     Resolves ${NAME}, ${DATETIME_DOWN}, ${DATETIME_UP}, and ${TOTAL_TIME} placeholders
-    in the body template, then combines subject and body into a single message since
-    Telegram has no subject field.
+    in the body template, then combines subject and body into a single caption since
+    Telegram's sendPhoto has no subject field.
 
     Args:
         recipient: Dict with 'name', 'bot_token', and 'chat_id' keys.
@@ -502,15 +624,17 @@ def _send_telegram_recovery_alert(
         duration_minutes: Total outage duration in minutes, or None if unavailable.
         subject: Subject line (same value used for the email subject).
         body_template: Body template string with optional placeholders.
+        tz_name: IANA timezone name used to render the placeholders.
+        date_format: strftime pattern used to render the placeholders.
     """
     datetime_down = (
-        started_at.strftime("%Y-%m-%d %H:%M:%S UTC") if started_at else "unknown"
+        _format_datetime(started_at, tz_name, date_format) if started_at else "unknown"
     )
     total_time = str(duration_minutes) if duration_minutes is not None else "unknown"
     body = _resolve_template(body_template, {
         "NAME": recipient["name"],
         "DATETIME_DOWN": datetime_down,
-        "DATETIME_UP": recovery_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "DATETIME_UP": _format_datetime(recovery_timestamp, tz_name, date_format),
         "TOTAL_TIME": total_time,
     })
     _send_telegram_message(recipient["bot_token"], recipient["chat_id"], f"{subject}\n\n{body}")
@@ -546,7 +670,7 @@ def check_internet_status(request) -> tuple[str, int]:
 
         logger.info(
             "Last record: %s — %.1f min ago (threshold: %d min)",
-            last_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            _format_datetime(last_timestamp, config.timezone, config.date_format),
             diff_minutes,
             config.max_minutes,
         )
@@ -571,6 +695,8 @@ def check_internet_status(request) -> tuple[str, int]:
                                     diff_minutes=diff_minutes,
                                     subject=config.subject_down,
                                     body_template=config.body_down,
+                                    tz_name=config.timezone,
+                                    date_format=config.date_format,
                                 )
                         except Exception as e:
                             logger.error("Email down-alert failed: %s", e)
@@ -582,6 +708,8 @@ def check_internet_status(request) -> tuple[str, int]:
                                     last_timestamp=last_timestamp,
                                     subject=config.subject_down,
                                     body_template=config.body_down,
+                                    tz_name=config.timezone,
+                                    date_format=config.date_format,
                                 )
                         except Exception as e:
                             logger.error("Telegram down-alert failed: %s", e)
@@ -607,6 +735,8 @@ def check_internet_status(request) -> tuple[str, int]:
                                 duration_minutes=duration_minutes,
                                 subject=config.subject_up,
                                 body_template=config.body_up,
+                                tz_name=config.timezone,
+                                date_format=config.date_format,
                             )
                     except Exception as e:
                         logger.error("Email recovery-alert failed: %s", e)
@@ -620,6 +750,8 @@ def check_internet_status(request) -> tuple[str, int]:
                                 duration_minutes=duration_minutes,
                                 subject=config.subject_up,
                                 body_template=config.body_up,
+                                tz_name=config.timezone,
+                                date_format=config.date_format,
                             )
                     except Exception as e:
                         logger.error("Telegram recovery-alert failed: %s", e)
@@ -673,3 +805,107 @@ def whoami(request) -> tuple[dict, int]:
     """
     ip = _resolve_caller_ip(request)
     return {"ip": ip}, 200
+
+
+def _verify_caller(request) -> str | None:
+    """Verifies the Firebase ID token in the request's Authorization header.
+
+    Checks that the token is a valid, unexpired Firebase Auth token issued for
+    this project (GCP_PROJECT_ID) and belongs to the account allowed to manage
+    alerts (ALERT_EMAIL) — the same single-account restriction the frontend
+    already enforces at login, re-checked here because a client-side check
+    alone wouldn't stop someone from calling this endpoint directly with a
+    token for a different Google account.
+
+    Args:
+        request: HTTP request object provided by Cloud Functions runtime.
+
+    Returns:
+        The verified caller's email if the token is valid and authorized, else None.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[len("Bearer "):]
+    try:
+        claims = google_id_token.verify_firebase_token(
+            token, Request(), audience=os.environ["GCP_PROJECT_ID"]
+        )
+    except ValueError:
+        return None
+    if claims is None or not claims.get("email_verified"):
+        return None
+    email = claims.get("email")
+    if not email or email != os.environ.get("ALERT_EMAIL"):
+        return None
+    return email
+
+
+@functions_framework.http
+def send_test_alert(request) -> tuple:
+    """Sends a one-off test alert (email or Telegram) using draft settings values.
+
+    Lets the Settings screen preview a channel's current subject/body template,
+    timezone, and date format before saving — filled with synthetic sample data
+    instead of pulling a real incident from Firestore. Requires a valid Firebase
+    ID token (Authorization: Bearer <token>) for the ALERT_EMAIL account; see
+    _verify_caller.
+
+    Args:
+        request: HTTP request. JSON body:
+            channel: "email" or "telegram".
+            subject: Subject line (email) — prefixed with TEST_ALERT_PREFIX.
+            body_template: Body template with ${NAME}/${DATETIME_DOWN}/
+                ${DATETIME_UP}/${TOTAL_TIME} placeholders.
+            timezone: IANA timezone name used to render the placeholders.
+            date_format: strftime pattern used to render the placeholders.
+            recipients: List of Recipient dicts (email channel) or
+                TelegramRecipient dicts (telegram channel).
+
+    Returns:
+        A tuple of (response_body, http_status_code, headers).
+    """
+    if request.method == "OPTIONS":
+        return "", 204, _CORS_HEADERS
+
+    caller_email = _verify_caller(request)
+    if caller_email is None:
+        return {"error": "Unauthorized"}, 401, _CORS_HEADERS
+
+    payload = request.get_json(silent=True) or {}
+    channel = payload.get("channel")
+    subject = str(payload.get("subject", ""))
+    body_template = str(payload.get("body_template", ""))
+    tz_name = str(payload.get("timezone") or DEFAULT_TIMEZONE)
+    date_format = str(payload.get("date_format") or DEFAULT_DATE_FORMAT)
+    recipients = payload.get("recipients") or []
+
+    if channel not in ("email", "telegram") or not recipients:
+        return {"error": "Invalid request"}, 400, _CORS_HEADERS
+
+    now = datetime.now(timezone.utc)
+    started_at = now - timedelta(minutes=TEST_ALERT_DOWNTIME_MINUTES)
+    test_subject = f"{TEST_ALERT_PREFIX}{subject}"
+
+    sent = 0
+    try:
+        for recipient in recipients:
+            body = _resolve_template(body_template, {
+                "NAME": recipient.get("name", ""),
+                "DATETIME_DOWN": _format_datetime(started_at, tz_name, date_format),
+                "DATETIME_UP": _format_datetime(now, tz_name, date_format),
+                "TOTAL_TIME": str(TEST_ALERT_DOWNTIME_MINUTES),
+            })
+            if channel == "email":
+                _send_email(to=recipient["email"], subject=test_subject, body=body)
+            else:
+                _send_telegram_message(
+                    recipient["bot_token"], recipient["chat_id"], f"{test_subject}\n\n{body}"
+                )
+            sent += 1
+    except Exception as e:
+        logger.error("Test %s alert failed: %s", channel, e)
+        return {"error": str(e)}, 502, _CORS_HEADERS
+
+    logger.info("Test %s alert sent by %s to %d recipient(s)", channel, caller_email, sent)
+    return {"ok": True, "sent": sent}, 200, _CORS_HEADERS

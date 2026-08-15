@@ -174,3 +174,79 @@ resource "google_cloud_run_service_iam_member" "whoami_invoker" {
   role     = "roles/run.invoker"
   member   = "allUsers"
 }
+
+# ---------------------------------------------------------------------------
+# Cloud Function (Gen 2) — send-test-alert
+#
+# Called directly from the Settings screen's "Test send" buttons to preview an
+# email/Telegram alert with the draft (possibly unsaved) subject, body,
+# timezone, and date format. IAM allows unauthenticated invocation (needed so
+# the browser can call it directly), but the function itself only acts on
+# requests carrying a valid Firebase ID token for the ALERT_EMAIL account
+# (see _verify_caller in main.py) — the real access control lives in
+# application code here, not in IAM.
+# ---------------------------------------------------------------------------
+
+resource "google_cloudfunctions2_function" "send_test_alert" {
+  name     = "send-test-alert"
+  location = var.region
+
+  labels = local.common_labels
+
+  build_config {
+    runtime     = "python312"
+    entry_point = "send_test_alert"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_source.name
+        object = google_storage_bucket_object.function_source.name
+      }
+    }
+  }
+
+  service_config {
+    available_memory   = "256M"
+    timeout_seconds    = 30
+    min_instance_count = 0
+    max_instance_count = 1
+
+    environment_variables = {
+      GCP_PROJECT_ID = var.project_id
+      ALERT_EMAIL    = var.alert_email
+    }
+
+    # Sensitive values injected from Secret Manager at startup — needed for
+    # the email channel (Gmail API), unused but harmless for telegram tests.
+    secret_environment_variables {
+      key        = "GMAIL_CLIENT_ID"
+      project_id = var.project_id
+      secret     = data.google_secret_manager_secret.gmail_client_id.secret_id
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      key        = "GMAIL_CLIENT_SECRET"
+      project_id = var.project_id
+      secret     = data.google_secret_manager_secret.gmail_client_secret.secret_id
+      version    = "latest"
+    }
+
+    secret_environment_variables {
+      key        = "GMAIL_REFRESH_TOKEN"
+      project_id = var.project_id
+      secret     = data.google_secret_manager_secret.gmail_refresh_token.secret_id
+      version    = "latest"
+    }
+
+    service_account_email = var.sa_email
+  }
+}
+
+resource "google_cloud_run_service_iam_member" "send_test_alert_invoker" {
+  project  = var.project_id
+  location = var.region
+  service  = google_cloudfunctions2_function.send_test_alert.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}

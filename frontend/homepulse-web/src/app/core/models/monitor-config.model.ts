@@ -30,5 +30,9 @@ export interface MonitorConfig {
   telegram_recipients: TelegramRecipient[];
   notify_telegram_on_down: boolean;
   notify_telegram_on_recovery: boolean;
+  /** IANA timezone name (e.g. "America/Sao_Paulo") used to render alert timestamps. */
+  timezone: string;
+  /** strftime pattern used to render alert timestamps. */
+  date_format: string;
   updated_at?: Timestamp;
 }
