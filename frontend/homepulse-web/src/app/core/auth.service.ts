@@ -46,4 +46,15 @@ export class AuthService {
       switchMap(() => new Observable<void>((obs) => { obs.next(); obs.complete(); })),
     );
   }
+
+  /**
+   * Returns a fresh Firebase ID token for the signed-in user, to authenticate
+   * calls to backend Cloud Functions that verify it themselves.
+   *
+   * @returns Promise resolving to the ID token, or null when signed out.
+   */
+  getIdToken(): Promise<string | null> {
+    const currentUser = this.auth.currentUser;
+    return currentUser ? currentUser.getIdToken() : Promise.resolve(null);
+  }
 }

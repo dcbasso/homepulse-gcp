@@ -1,6 +1,7 @@
 export const environment = {
   production: true,
   allowedEmail: 'your-email@gmail.com',
+  testAlertFunctionUrl: 'https://REGION-YOUR_PROJECT_ID.cloudfunctions.net/send-test-alert',
   firebase: {
     apiKey: 'YOUR_FIREBASE_API_KEY',
     authDomain: 'YOUR_PROJECT_ID.firebaseapp.com',

@@ -13,7 +13,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs';
+import { merge, take } from 'rxjs';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatCheckboxModule } from '@angular/material/checkbox';
@@ -22,15 +22,17 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { TranslatePipe, TranslateService } from '@ngx-translate/core';
 import { Timestamp } from '@angular/fire/firestore';
 import { NavbarComponent } from '../../shared/navbar/navbar.component';
-import { SettingsDataService } from './settings-data.service';
+import { SettingsDataService, TestAlertRequest } from './settings-data.service';
 import { MonitorConfig, Recipient, TelegramRecipient } from '../../core/models/monitor-config.model';
 import { environment } from '../../../environments/environment';
 import { TelegramHelpDialogComponent } from './components/telegram-help-dialog/telegram-help-dialog.component';
+import { formatPreview } from './date-format-preview.util';
 
 const DEFAULT_SUBJECT_PREFIX = 'HomePulse';
 const DEFAULT_SUBJECT_DOWN_SUFFIX = 'Internet is down';
@@ -39,6 +41,21 @@ const DEFAULT_BODY_DOWN =
   'No heartbeat received since ${DATETIME_DOWN}.\n\nHi ${NAME}, you will receive another email once the internet comes back.';
 const DEFAULT_BODY_UP =
   'Hi ${NAME}, the internet is back!\n\nDown at: ${DATETIME_DOWN}\nRecovered at: ${DATETIME_UP}\nTotal downtime: ${TOTAL_TIME} min';
+
+/** Matches the backend's DEFAULT_TIMEZONE/DEFAULT_DATE_FORMAT (main.py) for unconfigured docs. */
+const DEFAULT_TIMEZONE = 'UTC';
+const DEFAULT_DATE_FORMAT = '%d/%m/%Y %H:%M:%S %Z';
+
+/** Sentinel value for the date-format preset select when the user picked "Custom". */
+const CUSTOM_DATE_FORMAT_VALUE = '__custom__';
+
+/** Preset strftime patterns offered in the date-format select, each shown with its own preview. */
+const DATE_FORMAT_PRESETS: readonly string[] = [
+  DEFAULT_DATE_FORMAT,
+  '%Y-%m-%d %H:%M:%S',
+  '%d/%m/%Y %H:%M',
+  '%m/%d/%Y %I:%M %p',
+];
 
 const FORM_DEFAULTS = {
   max_minutes_without_data: 45,
@@ -51,7 +68,45 @@ const FORM_DEFAULTS = {
   notify_on_recovery:       true,
   notify_telegram_on_down:     true,
   notify_telegram_on_recovery: true,
+  timezone:                 DEFAULT_TIMEZONE,
+  date_format:              DEFAULT_DATE_FORMAT,
 };
+
+/**
+ * Resolves the browser's local IANA timezone, falling back to DEFAULT_TIMEZONE
+ * if the runtime can't report one.
+ */
+function detectBrowserTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIMEZONE;
+  } catch {
+    return DEFAULT_TIMEZONE;
+  }
+}
+
+/**
+ * Lists IANA timezone names supported by the current browser.
+ * Falls back to a single-entry list when `Intl.supportedValuesOf` is unavailable.
+ */
+function listSupportedTimezones(): string[] {
+  const supportedValuesOf = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] })
+    .supportedValuesOf;
+  try {
+    return supportedValuesOf ? supportedValuesOf('timeZone') : [DEFAULT_TIMEZONE];
+  } catch {
+    return [DEFAULT_TIMEZONE];
+  }
+}
+
+/**
+ * Maps a stored strftime pattern to its matching preset, or CUSTOM_DATE_FORMAT_VALUE
+ * when it doesn't match any preset.
+ *
+ * @param dateFormat - The strftime pattern currently held by the form.
+ */
+function presetForDateFormat(dateFormat: string): string {
+  return DATE_FORMAT_PRESETS.includes(dateFormat) ? dateFormat : CUSTOM_DATE_FORMAT_VALUE;
+}
 
 /** Bot token pattern: "<numeric bot id>:<secret>" as issued by @BotFather. */
 const TELEGRAM_BOT_TOKEN_PATTERN = /^\d+:[A-Za-z0-9_-]+$/;
@@ -139,6 +194,7 @@ function maskBotToken(token: string): string {
     MatButtonModule,
     MatProgressSpinnerModule,
     MatIconModule,
+    MatSelectModule,
     MatTooltipModule,
     TranslatePipe,
   ],
@@ -163,6 +219,50 @@ function maskBotToken(token: string): string {
               <input matInput type="number" formControlName="max_minutes_without_data" />
               <mat-hint>{{ 'SETTINGS.FIELD_THRESHOLD_HINT' | translate }}</mat-hint>
             </mat-form-field>
+
+          </mat-card-content>
+        </mat-card>
+
+        <!-- Date & Time section -->
+        <mat-card class="settings-card">
+          <mat-card-header>
+            <mat-card-title>{{ 'SETTINGS.SECTION_DATETIME' | translate }}</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>{{ 'SETTINGS.FIELD_TIMEZONE' | translate }}</mat-label>
+              <mat-select formControlName="timezone">
+                @for (tz of timezoneOptions; track tz) {
+                  <mat-option [value]="tz">{{ tz }}</mat-option>
+                }
+              </mat-select>
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>{{ 'SETTINGS.FIELD_DATE_FORMAT' | translate }}</mat-label>
+              <mat-select
+                [value]="dateFormatPreset()"
+                (selectionChange)="onDateFormatPresetChange($event.value)"
+              >
+                @for (preset of dateFormatPresets; track preset) {
+                  <mat-option [value]="preset">{{ preset }}</mat-option>
+                }
+                <mat-option [value]="customDateFormatValue">
+                  {{ 'SETTINGS.FIELD_DATE_FORMAT_CUSTOM' | translate }}
+                </mat-option>
+              </mat-select>
+            </mat-form-field>
+
+            @if (dateFormatPreset() === customDateFormatValue) {
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>{{ 'SETTINGS.FIELD_DATE_FORMAT_CUSTOM' | translate }}</mat-label>
+                <input matInput type="text" formControlName="date_format" />
+                <mat-hint>{{ 'SETTINGS.FIELD_DATE_FORMAT_CUSTOM_HINT' | translate }}</mat-hint>
+              </mat-form-field>
+            }
+
+            <p class="placeholder-hint">{{ 'SETTINGS.FIELD_DATE_FORMAT_PREVIEW' | translate }}: {{ datePreview() }}</p>
 
           </mat-card-content>
         </mat-card>
@@ -256,6 +356,24 @@ function maskBotToken(token: string): string {
               <span matTextPrefix class="subject-prefix">[&nbsp;{{ form.get('email_subject_prefix')?.value || defaultSubjectPrefix }}&nbsp;]&nbsp;</span>
               <input matInput type="text" formControlName="email_subject_up" />
             </mat-form-field>
+
+            <div class="test-send-row">
+              <button
+                type="button"
+                mat-stroked-button
+                (click)="testSendEmail()"
+                [disabled]="testingEmail() || recipients().length === 0"
+              >
+                @if (testingEmail()) {
+                  <mat-spinner diameter="18" />
+                } @else {
+                  {{ 'SETTINGS.TEST_SEND' | translate }}
+                }
+              </button>
+              @if (recipients().length === 0) {
+                <span class="test-send-hint">{{ 'SETTINGS.TEST_SEND_NO_RECIPIENTS' | translate }}</span>
+              }
+            </div>
 
           </mat-card-content>
         </mat-card>
@@ -360,6 +478,24 @@ function maskBotToken(token: string): string {
               <mat-checkbox formControlName="notify_telegram_on_recovery">
                 {{ 'SETTINGS.FIELD_NOTIFY_RECOVERY_TELEGRAM' | translate }}
               </mat-checkbox>
+            </div>
+
+            <div class="test-send-row">
+              <button
+                type="button"
+                mat-stroked-button
+                (click)="testSendTelegram()"
+                [disabled]="testingTelegram() || telegramRecipients().length === 0"
+              >
+                @if (testingTelegram()) {
+                  <mat-spinner diameter="18" />
+                } @else {
+                  {{ 'SETTINGS.TEST_SEND' | translate }}
+                }
+              </button>
+              @if (telegramRecipients().length === 0) {
+                <span class="test-send-hint">{{ 'SETTINGS.TEST_SEND_NO_RECIPIENTS' | translate }}</span>
+              }
             </div>
 
           </mat-card-content>
@@ -562,6 +698,22 @@ function maskBotToken(token: string): string {
       padding: 0.25rem 0;
     }
 
+    .test-send-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding-top: 0.25rem;
+    }
+
+    .test-send-row button[mat-stroked-button] mat-spinner {
+      display: inline-block;
+    }
+
+    .test-send-hint {
+      font-size: 0.8rem;
+      color: var(--mat-sys-on-surface-variant);
+    }
+
     .actions {
       display: flex;
       align-items: center;
@@ -615,6 +767,12 @@ export class SettingsComponent implements OnInit {
   /** True while the Firestore save operation is in flight. */
   readonly saving = signal(false);
 
+  /** True while a test email send is in flight. */
+  readonly testingEmail = signal(false);
+
+  /** True while a test Telegram send is in flight. */
+  readonly testingTelegram = signal(false);
+
   /** Formatted "dd/MM/yyyy HH:mm" string of last successful save, or null. */
   readonly lastUpdated = signal<string | null>(null);
 
@@ -652,6 +810,21 @@ export class SettingsComponent implements OnInit {
   /** Exposes the default subject prefix to the template while the field is empty. */
   protected readonly defaultSubjectPrefix = DEFAULT_SUBJECT_PREFIX;
 
+  /** IANA timezone names offered in the timezone select. */
+  protected readonly timezoneOptions = listSupportedTimezones();
+
+  /** strftime presets offered in the date-format select. */
+  protected readonly dateFormatPresets = DATE_FORMAT_PRESETS;
+
+  /** Sentinel value identifying the "Custom" option in the date-format select. */
+  protected readonly customDateFormatValue = CUSTOM_DATE_FORMAT_VALUE;
+
+  /** Which date-format preset is currently selected (or CUSTOM_DATE_FORMAT_VALUE). */
+  readonly dateFormatPreset = signal<string>(CUSTOM_DATE_FORMAT_VALUE);
+
+  /** Live preview of `date_format` rendered in `timezone`, for display only. */
+  readonly datePreview = signal('');
+
   readonly form = this.fb.group({
     max_minutes_without_data: [FORM_DEFAULTS.max_minutes_without_data, [Validators.required, Validators.min(1)]],
     email_subject_prefix:     [FORM_DEFAULTS.email_subject_prefix,     Validators.required],
@@ -663,7 +836,17 @@ export class SettingsComponent implements OnInit {
     notify_on_recovery:       [FORM_DEFAULTS.notify_on_recovery],
     notify_telegram_on_down:      [FORM_DEFAULTS.notify_telegram_on_down],
     notify_telegram_on_recovery:  [FORM_DEFAULTS.notify_telegram_on_recovery],
+    timezone:                 [FORM_DEFAULTS.timezone,    Validators.required],
+    date_format:              [FORM_DEFAULTS.date_format, Validators.required],
   });
+
+  constructor() {
+    merge(
+      this.form.controls.timezone.valueChanges,
+      this.form.controls.date_format.valueChanges,
+    ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.updateDatePreview());
+    this.updateDatePreview();
+  }
 
   /** Separate form group for the inline add/edit recipient panel. */
   readonly addForm = this.fb.group({
@@ -711,12 +894,18 @@ export class SettingsComponent implements OnInit {
         notify_on_recovery:       config?.notify_on_recovery       ?? FORM_DEFAULTS.notify_on_recovery,
         notify_telegram_on_down:      config?.notify_telegram_on_down     ?? FORM_DEFAULTS.notify_telegram_on_down,
         notify_telegram_on_recovery:  config?.notify_telegram_on_recovery ?? FORM_DEFAULTS.notify_telegram_on_recovery,
+        // A config doc that predates this field falls back to UTC (matching its actual
+        // past behavior); a brand-new install with no doc at all defaults to the browser's
+        // own timezone, which is a friendlier first-run guess.
+        timezone:                 config?.timezone ?? (config ? DEFAULT_TIMEZONE : detectBrowserTimezone()),
+        date_format:              config?.date_format ?? FORM_DEFAULTS.date_format,
       };
 
       this.form.patchValue(this.savedFormValues);
       this.form.markAsPristine();
       this.recipientsDirty.set(false);
       this.telegramRecipientsDirty.set(false);
+      this.dateFormatPreset.set(presetForDateFormat(this.savedFormValues.date_format));
 
       if (config?.updated_at) {
         this.lastUpdated.set(formatTimestamp(config.updated_at));
@@ -756,6 +945,8 @@ export class SettingsComponent implements OnInit {
         telegram_recipients:          telegramRecipientList,
         notify_telegram_on_down:      raw.notify_telegram_on_down     ?? true,
         notify_telegram_on_recovery:  raw.notify_telegram_on_recovery ?? true,
+        timezone:                  raw.timezone    ?? DEFAULT_TIMEZONE,
+        date_format:               raw.date_format ?? FORM_DEFAULTS.date_format,
       };
 
       await this.dataService.saveConfig(values);
@@ -771,6 +962,8 @@ export class SettingsComponent implements OnInit {
         notify_on_recovery:       values.notify_on_recovery,
         notify_telegram_on_down:      values.notify_telegram_on_down,
         notify_telegram_on_recovery:  values.notify_telegram_on_recovery,
+        timezone:                  values.timezone,
+        date_format:               values.date_format,
       };
       this.savedRecipients = [...recipientList];
       this.savedTelegramRecipients = [...telegramRecipientList];
@@ -778,6 +971,7 @@ export class SettingsComponent implements OnInit {
       this.form.markAsPristine();
       this.recipientsDirty.set(false);
       this.telegramRecipientsDirty.set(false);
+      this.dateFormatPreset.set(presetForDateFormat(values.date_format));
       this.snackBar.open(this.translate.instant('SETTINGS.SAVE_SUCCESS'), '', { duration: 3000 });
     } catch {
       this.snackBar.open(this.translate.instant('SETTINGS.SAVE_ERROR'), '', { duration: 4000 });
@@ -800,6 +994,30 @@ export class SettingsComponent implements OnInit {
     this.telegramRecipients.set([...this.savedTelegramRecipients]);
     this.telegramRecipientsDirty.set(false);
     this.showTelegramRecipientForm.set(false);
+    this.dateFormatPreset.set(presetForDateFormat(this.savedFormValues.date_format));
+    this.cdr.markForCheck();
+  }
+
+  /**
+   * Applies a date-format preset selection: updates the preset select's own state and,
+   * unless "Custom" was picked, writes the preset's strftime pattern into the form.
+   *
+   * @param value - Selected preset's strftime pattern, or CUSTOM_DATE_FORMAT_VALUE.
+   */
+  onDateFormatPresetChange(value: string): void {
+    this.dateFormatPreset.set(value);
+    if (value !== CUSTOM_DATE_FORMAT_VALUE) {
+      this.form.get('date_format')?.setValue(value);
+      this.form.get('date_format')?.markAsDirty();
+    }
+  }
+
+  /** Recomputes the live date-format preview from the form's current values. */
+  private updateDatePreview(): void {
+    const { date_format, timezone } = this.form.getRawValue();
+    this.datePreview.set(
+      formatPreview(date_format || FORM_DEFAULTS.date_format, timezone || DEFAULT_TIMEZONE),
+    );
     this.cdr.markForCheck();
   }
 
@@ -934,5 +1152,67 @@ export class SettingsComponent implements OnInit {
     const botToken = this.addTelegramForm.get('bot_token')?.value;
     if (!botToken) return;
     window.open(`${TELEGRAM_API_BASE}/bot${botToken}/getUpdates`, '_blank', 'noopener,noreferrer');
+  }
+
+  /**
+   * Sends a test email to the currently listed recipients, using the form's
+   * current — possibly unsaved — recovery subject/body, timezone, and date
+   * format, filled with synthetic sample data.
+   */
+  async testSendEmail(): Promise<void> {
+    if (this.testingEmail() || this.recipients().length === 0) return;
+    this.testingEmail.set(true);
+    try {
+      const sent = await this.dataService.sendTestAlert({
+        ...this.buildTestAlertBase(),
+        channel: 'email',
+        recipients: this.recipients(),
+      });
+      this.snackBar.open(
+        this.translate.instant('SETTINGS.TEST_SEND_SUCCESS', { count: sent }), '', { duration: 3000 },
+      );
+    } catch {
+      this.snackBar.open(this.translate.instant('SETTINGS.TEST_SEND_ERROR'), '', { duration: 4000 });
+    } finally {
+      this.testingEmail.set(false);
+      this.cdr.markForCheck();
+    }
+  }
+
+  /**
+   * Sends a test Telegram message to the currently listed recipients, using the
+   * form's current — possibly unsaved — recovery subject/body, timezone, and date
+   * format, filled with synthetic sample data.
+   */
+  async testSendTelegram(): Promise<void> {
+    if (this.testingTelegram() || this.telegramRecipients().length === 0) return;
+    this.testingTelegram.set(true);
+    try {
+      const sent = await this.dataService.sendTestAlert({
+        ...this.buildTestAlertBase(),
+        channel: 'telegram',
+        recipients: this.telegramRecipients(),
+      });
+      this.snackBar.open(
+        this.translate.instant('SETTINGS.TEST_SEND_SUCCESS', { count: sent }), '', { duration: 3000 },
+      );
+    } catch {
+      this.snackBar.open(this.translate.instant('SETTINGS.TEST_SEND_ERROR'), '', { duration: 4000 });
+    } finally {
+      this.testingTelegram.set(false);
+      this.cdr.markForCheck();
+    }
+  }
+
+  /** Builds the subject/body/timezone/date-format shared by both test-send channels. */
+  private buildTestAlertBase(): Omit<TestAlertRequest, 'channel' | 'recipients'> {
+    const raw = this.form.getRawValue();
+    const subjectPrefix = raw.email_subject_prefix || FORM_DEFAULTS.email_subject_prefix;
+    return {
+      subject: buildSubjectPrefixMarker(subjectPrefix) + (raw.email_subject_up ?? FORM_DEFAULTS.email_subject_up),
+      bodyTemplate: raw.email_body_up ?? DEFAULT_BODY_UP,
+      timezone: raw.timezone ?? DEFAULT_TIMEZONE,
+      dateFormat: raw.date_format ?? FORM_DEFAULTS.date_format,
+    };
   }
 }
