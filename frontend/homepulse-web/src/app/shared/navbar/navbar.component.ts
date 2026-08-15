@@ -143,6 +143,7 @@ const MOBILE_BREAKPOINT = '(max-width: 768px)';
     .app-logo {
       height: 28px;
       width: 28px;
+      object-fit: contain;
       margin-right: 0.5rem;
     }
     .app-title {
